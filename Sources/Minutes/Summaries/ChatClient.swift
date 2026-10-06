@@ -48,6 +48,7 @@ enum ProviderError: LocalizedError {
     case invalidURL(String)
     case http(status: Int, message: String)
     case emptyResponse
+    case outOfTokens
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +56,7 @@ enum ProviderError: LocalizedError {
         case .invalidURL(let url): "The base URL “\(url)” is not valid."
         case .http(let status, let message): "The provider returned \(status): \(message)"
         case .emptyResponse: "The provider returned an empty response."
+        case .outOfTokens: "The model used its whole token budget before answering. It is probably a reasoning model: turn off its thinking mode or choose a non-reasoning model."
         }
     }
 
@@ -109,17 +111,22 @@ struct ChatClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Newer OpenAI models reject max_tokens; other providers only know max_tokens.
         let tokenKey = request.url?.host == "api.openai.com" ? "max_completion_tokens" : "max_tokens"
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": endpoint.model,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
             tokenKey: maxTokens,
         ]
+        // DeepSeek V4 models think by default; the reasoning would eat the token budget and leave no answer.
+        if request.url?.host == "api.deepseek.com" { body["thinking"] = ["type": "disabled"] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let data = try await ProviderHTTP.send(request, retries: retries)
         let response = try JSONDecoder().decode(Response.self, from: data)
-        let text = response.choices.first?.message.content?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !text.isEmpty else { throw ProviderError.emptyResponse }
+        let choice = response.choices.first
+        let text = choice?.message.content?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !text.isEmpty else {
+            throw choice?.finishReason == "length" ? ProviderError.outOfTokens : ProviderError.emptyResponse
+        }
         return Self.strippingReasoning(text)
     }
 
@@ -139,6 +146,12 @@ struct ChatClient: Sendable {
         struct Choice: Decodable {
             struct Message: Decodable { let content: String? }
             let message: Message
+            let finishReason: String?
+
+            enum CodingKeys: String, CodingKey {
+                case message
+                case finishReason = "finish_reason"
+            }
         }
         let choices: [Choice]
     }

@@ -170,7 +170,7 @@ tags:
   - budget
 summary_type: general
 transcription: parakeet-v3
-summary_model: deepseek-chat
+summary_model: deepseek-flash
 recovered: false
 calendar: "Work"
 attendees: [Ana Pérez, john@acme.com]

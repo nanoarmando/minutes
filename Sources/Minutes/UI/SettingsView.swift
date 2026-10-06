@@ -212,7 +212,7 @@ private struct SummariesSettings: View {
 
     private static let presets: [(name: String, baseURL: String, model: String)] = [
         ("Ollama", "http://localhost:11434/v1", "llama3.2"),
-        ("DeepSeek", "https://api.deepseek.com", "deepseek-chat"),
+        ("DeepSeek", "https://api.deepseek.com", "deepseek-flash"),
         ("OpenAI", "https://api.openai.com/v1", "gpt-4.1-mini"),
     ]
 
@@ -224,7 +224,7 @@ private struct SummariesSettings: View {
                     Text("Custom").tag("Custom")
                 }
                 EndpointFields(environment: environment, baseURL: \.summaryBaseURL, model: \.summaryModel, account: .summary) {
-                    _ = try await ChatClient(endpoint: $0, timeout: 60, retries: 0).complete(system: "Reply with OK.", user: "OK?", maxTokens: 5)
+                    _ = try await ChatClient(endpoint: $0, timeout: 60, retries: 0).complete(system: "Reply with OK.", user: "OK?", maxTokens: 64)
                 }
             } header: {
                 Text("Provider")
