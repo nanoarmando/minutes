@@ -106,6 +106,22 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   swallowed). Pending notes are retried once at launch after the first index scan. The meeting detail shows
   "Tagging failed" with Re-tag when `lastError` is set. The sidecar also stores `event` (`EventInfo` with
   `attendeeEmails` and `ownDomain`) for later re-tags.
+- **Meeting context:** `MeetingContext` builds one block (title, attendees with domains, user's organization, known
+  client tags, glossary, the meeting's `instructions`, and a "the transcript can misspell names" note) that summary,
+  title and tag requests put before the transcript. Client naming: title and attendee domains win over the
+  transcript; a Swift guard replaces a model tag that shares no token with the domain label or title words with the
+  domain-derived tag.
+- **Reasoning:** `ChatClient.complete(…, reasoning:)`; on api.deepseek.com `thinking` is enabled with `reasoning_effort: "medium"`
+  only for summaries (16,000 tokens, 300 s); titles, tags and the connection test keep it disabled.
+- **Corrections:** `Glossary` (`~/Library/Application Support/Minutes/glossary.json`, `[{from, to}]`) is applied
+  whole-word and case-insensitively to new transcripts before the first write, and listed in the notes dictionary.
+  `CorrectionService` asks the model for `{"replacements": [...]}` from the user's instructions and the transcript's
+  candidate names (only `from` values present in the transcript are kept); `NoteWriter.applyCorrections` edits only
+  the transcript section and sidecar segments. The sheet applies in one step (no preview). Instructions are stored
+  in the sidecar `instructions`, are not displayed in the detail, pre-fill the sheet, and are sent on every
+  regenerate and re-tag.
+- **Dock policy:** decided only by whether a Meetings, Settings or About window is open (visible or minimized),
+  never by focus; only a closing window can demote to `.accessory`, and the policy is set only when it changes.
 - **Calendar preferences:** `useCalendar` (off by default), `suggestRecording` (on by default) and
   `unfollowedCalendars` (calendar identifiers; storing the unfollowed set keeps new calendars followed). The event
   is the one in progress at start in a followed calendar, ignoring all-day events, with the most overlap.

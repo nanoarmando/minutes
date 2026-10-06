@@ -13,15 +13,9 @@ struct TagService: Sendable {
     let topicTags: Bool
     /// "Your email addresses", lowercased.
     let userEmails: [String]
+    let glossary: [GlossaryEntry]
     /// Nil when no provider is configured: no automatic tags.
     let service: SummaryService?
-
-    /// What the tagging call knows about the meeting besides its transcript.
-    private struct Context {
-        var title: String
-        var clientDomains: [String]
-        var ownDomains: [String]
-    }
 
     /// Recomputes the automatic tags of a note and writes manual + automatic tags into its front matter.
     /// When the model call fails, client domains are still tagged from the domain itself, the tags are written,
@@ -31,7 +25,10 @@ struct TagService: Sendable {
         let transcript = NoteFile.transcriptSection(of: document)
         let writer = NoteWriter(folder: note.deletingLastPathComponent())
         let sidecar = writer.readSidecar(id: id)
-        let context = context(document: document, event: sidecar?.event)
+        let context = MeetingContext.forNote(
+            note, id: id, document: document, userEmails: userEmails,
+            knownClients: existingTags.filter { $0.hasPrefix("client/") }, glossary: glossary
+        )
 
         var clients: [String] = []
         var topics: [String] = []
@@ -51,43 +48,45 @@ struct TagService: Sendable {
         if let failure { throw failure }
     }
 
-    /// The sidecar's calendar event when there is one, else the front matter title and the attendees that are
-    /// email addresses, with the domains of "Your email addresses" as the user's organization.
-    private func context(document: String, event: EventInfo?) -> Context {
-        let frontMatter = NoteFile.frontMatter(of: document)
-        let title = frontMatter?.scalars["title"] ?? event?.title ?? ""
-        let emails = event?.attendeeEmails ?? (frontMatter?.lists["attendees"] ?? []).filter { $0.contains("@") && !userEmails.contains($0.lowercased()) }
-        let own = ClientDomains.ownDomains(ownDomain: event?.ownDomain, userEmails: userEmails)
-        return Context(title: title, clientDomains: ClientDomains.clientDomains(attendeeEmails: emails, ownDomains: own), ownDomains: own)
-    }
-
-    private func modelTags(transcript: String, context: Context, service: SummaryService) async throws -> (clients: [String], topics: [String]) {
-        let header = [
-            context.title.isEmpty ? nil : "Meeting title: \(context.title)",
-            context.clientDomains.isEmpty ? nil : "Client domains: \(context.clientDomains.joined(separator: ", "))",
-            context.ownDomains.isEmpty ? nil : "User's organization: \(context.ownDomains.joined(separator: ", "))",
-        ].compactMap { $0 }.joined(separator: "\n")
-        let user = (header.isEmpty ? "" : header + "\n\nTranscript:\n") + Self.excerpt(transcript)
-        let reply = try await service.client.complete(system: prompt(language: MeetingLanguage(of: transcript), context: context), user: user, maxTokens: 300)
+    private func modelTags(transcript: String, context: MeetingContext, service: SummaryService) async throws -> (clients: [String], topics: [String]) {
+        let reply = try await service.client.complete(
+            system: prompt(language: MeetingLanguage(of: transcript), context: context),
+            user: context.message(transcript: Self.excerpt(transcript)), maxTokens: 300
+        )
         struct Reply: Decodable { var clients: [String]?; var topics: [String]? }
         guard let parsed = ChatClient.decodeJSON(Reply.self, from: reply) else { return ([], []) }
-        let clients = detectClients
-            ? Self.unique((parsed.clients ?? []).map { Self.slug($0.replacingOccurrences(of: "client/", with: "")) })
-                .filter { !$0.isEmpty && !ClientDomains.isOwn($0, ownDomains: context.ownDomains) }
-                .prefix(ClientDomains.maxClients).map { "client/" + $0 }
-            : []
+        let named = Self.unique((parsed.clients ?? []).map { Self.slug($0.replacingOccurrences(of: "client/", with: "")) })
+            .filter { !$0.isEmpty && !ClientDomains.isOwn($0, ownDomains: context.userOrganization) }
+        let clients = detectClients ? Self.guarded(named, context: context).prefix(ClientDomains.maxClients).map { "client/" + $0 } : []
         let topics = topicTags
             ? Self.unique((parsed.topics ?? []).map(Self.slug)).filter { !$0.isEmpty && !$0.hasPrefix("client") }.prefix(Self.maxTopics)
             : []
         return (Array(clients), Array(topics))
     }
 
-    private func prompt(language: MeetingLanguage?, context: Context) -> String {
+    /// With client domains, the model's name for each domain (in order) must relate to the domain or the title;
+    /// otherwise, such as a misheard name reused from an old tag, the domain-derived name is used.
+    private static func guarded(_ named: [String], context: MeetingContext) -> [String] {
+        guard !context.clientDomains.isEmpty else { return named }
+        let titleWords = slug(context.title).split(separator: "-").map(String.init).filter { $0.count >= 3 }
+        return context.clientDomains.enumerated().map { index, domain in
+            let label = slug(String(domain.split(separator: ".").first ?? "")).replacingOccurrences(of: "-", with: "")
+            let fallback = String(ClientDomains.fallbackTag(for: domain).dropFirst("client/".count))
+            guard index < named.count else { return fallback }
+            let candidate = named[index]
+            let tokens = [candidate.replacingOccurrences(of: "-", with: "")] + candidate.split(separator: "-").map(String.init).filter { $0.count >= 3 }
+            let evidence = [label] + titleWords
+            let related = tokens.contains { token in evidence.contains { $0.contains(token) || token.contains($0) } }
+            return related ? candidate : fallback
+        }
+    }
+
+    private func prompt(language: MeetingLanguage?, context: MeetingContext) -> String {
         let existingClients = existingTags.filter { $0.hasPrefix("client/") }
         let existingTopics = existingTags.filter { !$0.hasPrefix("client/") }
         var lines = [
             "You tag meeting transcripts. Reply with only a JSON object: {\"clients\": [...], \"topics\": [...]}.",
-            "The message starts with what is known about the meeting (title, client domains, the user's organization), then the transcript.",
+            "The message starts with what is known about the meeting (title, attendees, client domains, the user's organization, known clients, glossary, instructions), then the transcript.",
         ]
         if detectClients {
             let rule = context.clientDomains.isEmpty
@@ -97,13 +96,16 @@ struct TagService: Sendable {
                     Do not list tools or vendors mentioned in passing. For an internal meeting, return an empty list.
                     """
                 : """
-                    Return exactly one client per client domain listed, in the same order, named from the domain and \
-                    the conversation (for example "drgreenlife.com" → "DrGreenlife").
+                    Return exactly one client per client domain listed, in the same order. Name each one by comparing \
+                    the domain with the meeting title: the title's spelling wins over the domain's (for example \
+                    "DrGreenlife - Followup" and "drgreenlife.com" → "DrGreenlife"). The title and the domains take \
+                    precedence over the transcript, which is automatic and can misspell names.
                     """
             lines.append("""
-                "clients": \(rule) Never return the user's organization. When a client already has a tag below, return \
-                that exact tag, even if the meeting uses another name or an abbreviation (for example "Hemisphere" or "HB" → \
-                "client/hemisphere-brands"); otherwise return the client's name.
+                "clients": \(rule) Never return the user's organization. Reuse an existing client tag below only when it \
+                names the same company as the title or the domain (for example "HB" or "Hemisphere" for \
+                "client/hemisphere-brands"); a tag spelled differently from that evidence must not replace it. Use the \
+                glossary and the known clients to correct misheard names. Otherwise return the client's name.
                 Existing client tags: \(existingClients.isEmpty ? "none" : existingClients.joined(separator: ", "))
                 """)
         } else {
@@ -142,5 +144,12 @@ struct TagService: Sendable {
     private static func unique(_ tags: [String]) -> [String] {
         var seen = Set<String>()
         return tags.filter { seen.insert($0).inserted }
+    }
+}
+
+extension TagService {
+    /// Lowercase without accents, for loose text comparisons.
+    static func fold(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 }

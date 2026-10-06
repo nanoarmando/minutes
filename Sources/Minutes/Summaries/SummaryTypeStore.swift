@@ -86,14 +86,16 @@ final class SummaryTypeStore {
     static let builtIns: [SummaryType] = [
         SummaryType(id: generalID, name: "General", instructions: """
             Write these sections:
-            ## Overview
-            Two or three sentences on what the meeting was about and its outcome.
+            ## Context
+            One to three sentences: who met, about what, and the outcome.
             ## Key points
-            The main topics and facts discussed, as bullets.
+            The main topics with the concrete facts, figures, estimates and dates stated, as bullets, saying who said what.
             ## Decisions
-            Decisions that were made, as bullets.
+            Each decision with its reason, as bullets.
             ## Action items
-            Tasks as "- [ ] Owner: task (due date)" when an owner or date was mentioned, otherwise "- [ ] task".
+            "- [ ] Owner: task (due)" for each commitment; leave out the owner or due date only when nobody stated them.
+            ## Risks and open questions
+            Risks, blockers and unanswered questions, as bullets.
             """, isBuiltIn: true),
         SummaryType(id: "client-call", name: "Client call", instructions: """
             The meeting is a call with a client. Write these sections:

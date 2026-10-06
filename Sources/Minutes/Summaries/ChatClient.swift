@@ -106,7 +106,8 @@ struct ChatClient: Sendable {
     var timeout: TimeInterval = 300
     var retries = 3
 
-    func complete(system: String, user: String, maxTokens: Int = 2500) async throws -> String {
+    /// `reasoning` turns on the provider's thinking mode where one exists (DeepSeek); other providers ignore it.
+    func complete(system: String, user: String, maxTokens: Int = 2500, reasoning: Bool = false) async throws -> String {
         var request = try endpoint.request(for: "chat/completions", timeout: timeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // Newer OpenAI models reject max_tokens; other providers only know max_tokens.
@@ -116,8 +117,11 @@ struct ChatClient: Sendable {
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
             tokenKey: maxTokens,
         ]
-        // DeepSeek V4 models think by default; the reasoning would eat the token budget and leave no answer.
-        if request.url?.host == "api.deepseek.com" { body["thinking"] = ["type": "disabled"] }
+        // DeepSeek models think by default; outside summaries the reasoning would only cost time and tokens.
+        if request.url?.host == "api.deepseek.com" {
+            body["thinking"] = ["type": reasoning ? "enabled" : "disabled"]
+            if reasoning { body["reasoning_effort"] = "medium" }
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let data = try await ProviderHTTP.send(request, retries: retries)

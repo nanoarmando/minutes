@@ -12,6 +12,9 @@ struct MeetingDetailView: View {
     @State private var tagError: String?
     /// The last automatic tagging error recorded in the sidecar.
     @State private var taggingFailure: String?
+    /// The instructions saved for this meeting (sidecar), used to pre-fill "Correct with instructions…".
+    @State private var instructions: String?
+    @State private var isCorrecting = false
     @State private var isRetagging = false
 
     private static let readingWidth: CGFloat = 720
@@ -42,7 +45,12 @@ struct MeetingDetailView: View {
         }
         .task(id: "\(note.modified)-\(model.revision)") {
             content = await environment.noteIndex.content(of: note)
-            taggingFailure = NoteWriter(folder: note.url.deletingLastPathComponent()).readSidecar(id: note.id)?.tagging?.lastError
+            let sidecar = NoteWriter(folder: note.url.deletingLastPathComponent()).readSidecar(id: note.id)
+            taggingFailure = sidecar?.tagging?.lastError
+            instructions = sidecar?.instructions
+        }
+        .sheet(isPresented: $isCorrecting) {
+            CorrectionSheet(environment: environment, model: model, note: note, instructions: instructions ?? "")
         }
     }
 
@@ -62,6 +70,7 @@ struct MeetingDetailView: View {
             // Borderless buttons have no pressed state that can stick. The actions that switch to another app run on
             // the next turn of the run loop, after the click has been fully handled.
             HStack(spacing: 14) {
+                ActionButton("Correct with instructions…", systemImage: "wand.and.stars") { isCorrecting = true }
                 ActionButton("Open in editor", systemImage: "square.and.pencil") { NSWorkspace.shared.open(note.url) }
                 ActionButton("Copy summary", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()

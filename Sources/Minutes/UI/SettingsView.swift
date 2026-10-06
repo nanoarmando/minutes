@@ -249,6 +249,16 @@ private struct SummariesSettings: View {
                     editedTypeID = environment.summaryTypes.addCustom(name: "New type", instructions: "").id
                 }
             }
+            Section {
+                ForEach(environment.glossary.entries) { entry in
+                    GlossaryRow(store: environment.glossary, entry: entry)
+                }
+                Button("Add correction") { environment.glossary.save(GlossaryEntry(from: "", to: "")) }
+            } header: {
+                Text("Glossary")
+            } footer: {
+                Text("Names the transcription gets wrong. New meetings are corrected before they are saved, and the corrections are sent with every summary and tagging request. Past transcripts are not changed.")
+            }
         }
     }
 
@@ -263,6 +273,22 @@ private struct SummariesSettings: View {
                 }
             }
         )
+    }
+}
+
+private struct GlossaryRow: View {
+    let store: GlossaryStore
+    @State var entry: GlossaryEntry
+
+    var body: some View {
+        HStack {
+            TextField("Heard as", text: $entry.from)
+            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+            TextField("Correct spelling", text: $entry.to)
+            Button("Delete", systemImage: "trash") { store.delete(entry.id) }.labelStyle(.iconOnly).buttonStyle(.borderless)
+        }
+        .labelsHidden()
+        .onChange(of: entry) { store.save(entry) }
     }
 }
 

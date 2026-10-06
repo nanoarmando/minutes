@@ -151,14 +151,15 @@ final class CalendarService {
         let userEmails = Set(preferences.userEmails)
         let participants = event.attendees ?? []
         let isUser = { (participant: EKParticipant) in participant.isCurrentUser || userEmails.contains(Self.email(of: participant) ?? "") }
-        let others = participants.filter { !isUser($0) }
+        // Names and addresses stay aligned per attendee; a missing address is "".
+        let others = participants.filter { !isUser($0) && Self.displayName(of: $0) != nil }
         let userAddress = participants.compactMap(Self.email).first(where: userEmails.contains)
             ?? participants.first(where: \.isCurrentUser).flatMap(Self.email)
             ?? Self.emailAccount(event.calendar.source.title)
         return EventInfo(
             title: event.title ?? "", calendar: event.calendar.title,
             attendees: others.compactMap(Self.displayName), meetingLink: Self.meetingLink(of: event),
-            attendeeEmails: others.compactMap(Self.email), ownDomain: userAddress.flatMap(ClientDomains.domain)
+            attendeeEmails: others.map { Self.email(of: $0) ?? "" }, ownDomain: userAddress.flatMap(ClientDomains.domain)
         )
     }
 

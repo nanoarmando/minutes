@@ -112,7 +112,9 @@ removes lines that repeat the remote speech closely.
   including calendars added later).
 - **Transcription:** on this Mac (Parakeet v3) or an OpenAI-compatible API; model status; speaker separation.
 - **Summaries:** provider preset (Ollama, DeepSeek, OpenAI, Custom), base URL, API key, model, test connection,
-  summarize automatically, default summary type and the summary type editor. Tagging uses this provider too.
+  summarize automatically, default summary type, the summary type editor, and the **glossary** of name corrections
+  ("Doctor Grim" → "DrGreenlife") applied to every new transcript. Tagging uses this provider too. With DeepSeek,
+  summaries use its reasoning mode at medium effort (better summaries, a bit slower); titles and tags do not.
 - **Tags:** detect clients automatically, add up to three topic tags automatically, **Your email addresses**, and
   re-tag all meetings. Enter the addresses you join meetings with (for example your work addresses for each
   company you work for). In each meeting, the address you joined with tells Minutes which organization you
@@ -150,6 +152,15 @@ Minutes rewrites installed skills when you change the notes folder, and never to
 create.
 
 For a fully local setup, keep transcription on this Mac and use the Ollama preset (`http://localhost:11434/v1`).
+
+### Correcting a meeting
+
+Automatic transcription can mishear names. Every summary, title and tag request includes what Minutes knows about
+the meeting (title, attendees and their companies, your organization, known clients and the glossary) so the model
+writes names correctly. When something is still wrong, open the meeting and choose **Correct with instructions…**,
+then write what is wrong in your own words ("Doctor Grim is DrGreenlife; Pablo Veliz works at VNS") and choose
+Apply. Minutes fixes those names in the transcript, adds them to the glossary so they do not happen again, keeps
+your instructions with the meeting (they open pre-filled next time), and regenerates the summary and tags.
 
 ### Updates
 

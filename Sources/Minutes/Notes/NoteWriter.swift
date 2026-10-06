@@ -70,10 +70,28 @@ struct NoteWriter: Sendable {
 
     /// Records the outcome of a tagging attempt in the sidecar.
     func setTaggingState(_ state: TaggingState, id: UUID) throws {
+        try updateSidecar(id: id) { $0.tagging = state }
+    }
+
+    func updateSidecar(id: UUID, _ change: (inout Sidecar) -> Void) throws {
         var sidecar = readSidecar(id: id) ?? Sidecar(id: id, segments: [], summaries: [])
-        sidecar.tagging = state
+        change(&sidecar)
         try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: true)
         try writeSidecar(sidecar)
+    }
+
+    /// Applies name corrections to the transcript section of the note and to the sidecar segments; the front
+    /// matter and the summary are left untouched.
+    func applyCorrections(_ corrections: [GlossaryEntry], to noteURL: URL, id: UUID) throws {
+        let document = try String(contentsOf: noteURL, encoding: .utf8)
+        guard let heading = document.range(of: "\n## Transcript\n") else { return }
+        let corrected = document[..<heading.upperBound] + GlossaryEntry.apply(corrections, to: String(document[heading.upperBound...]))
+        try Data(corrected.utf8).write(to: noteURL, options: .atomic)
+        try updateSidecar(id: id) { sidecar in
+            for index in sidecar.segments.indices {
+                sidecar.segments[index].text = GlossaryEntry.apply(corrections, to: sidecar.segments[index].text)
+            }
+        }
     }
 
     func readSidecar(id: UUID) -> Sidecar? {

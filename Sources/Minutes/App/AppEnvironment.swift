@@ -40,6 +40,7 @@ final class AppEnvironment {
     let parakeet: ParakeetEngine
     let calendar: CalendarService
     let updates = UpdateCoordinator()
+    let glossary = GlossaryStore()
     @ObservationIgnored private var dictionary: NotesDictionary?
     /// Set by a scene view, which is where SwiftUI exposes the window actions.
     @ObservationIgnored var openWindow: ((String) -> Void)?
@@ -54,7 +55,7 @@ final class AppEnvironment {
         parakeet = ParakeetEngine { modelStateSink.yield($0) }
         calendar = CalendarService(preferences: Preferences.load())
         calendar.isRecording = { [weak self] in self?.isRecording ?? false }
-        dictionary = NotesDictionary(index: noteIndex, summaryTypes: summaryTypes)
+        dictionary = NotesDictionary(index: noteIndex, summaryTypes: summaryTypes, glossary: glossary)
         AgentIntegrations.updateInstalled(notesFolder: preferences.notesFolder)
         updates.isAppBusy = { [weak self] in self?.isBusy ?? false }
         updates.start()
@@ -98,13 +99,29 @@ final class AppEnvironment {
     }
 
     private var processor: MeetingProcessor {
-        MeetingProcessor(parakeet: parakeet, keychain: keychain, summaryType: summaryTypes.defaultType)
+        MeetingProcessor(
+            parakeet: parakeet, keychain: keychain, summaryType: summaryTypes.defaultType,
+            knownClients: knownClients, glossary: glossary.entries
+        )
     }
 
     private var tagService: TagService {
         TagService(
             existingTags: existingTags, detectClients: preferences.detectClients,
-            topicTags: preferences.topicTags, userEmails: preferences.userEmails, service: summaryService
+            topicTags: preferences.topicTags, userEmails: preferences.userEmails, glossary: glossary.entries,
+            service: summaryService
+        )
+    }
+
+    private var knownClients: [String] {
+        existingTags.filter { $0.hasPrefix("client/") }
+    }
+
+    /// The context sent with a saved note's summary and tagging requests.
+    func meetingContext(for note: NoteSummary, document: String) -> MeetingContext {
+        MeetingContext.forNote(
+            note.url, id: note.id, document: document, userEmails: preferences.userEmails,
+            knownClients: knownClients, glossary: glossary.entries
         )
     }
 
@@ -147,7 +164,10 @@ final class AppEnvironment {
 
     /// Minutes has no Dock icon (LSUIElement), so a window it opens stays behind the active app unless Minutes
     /// activates and orders the window front. SwiftUI creates the window asynchronously, hence the next run loop.
+    /// The policy becomes regular before activating: an activation while still an accessory app is not recorded in
+    /// the app switcher's order, which left Minutes last in ⌘Tab even while its window was in use.
     private func bringToFront(_ identifier: String) {
+        Self.setActivationPolicy(.regular)
         NSApp.activate()
         DispatchQueue.main.async {
             NSApp.activate()
@@ -157,21 +177,32 @@ final class AppEnvironment {
 
     /// Minutes is a menu bar app (LSUIElement); while the Meetings, Settings or About window is open it becomes a
     /// regular app so its icon shows in the Dock and the app switcher, and returns to accessory when the last closes.
+    /// The policy depends only on whether such a window is open (visible or minimized), never on focus: changing it
+    /// when Minutes merely loses focus would move it to the end of the app switcher.
     private func observeWindowsForDock() {
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
-            // Evaluated after the event, when a closing window is no longer visible.
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                Task { @MainActor in Self.updateActivationPolicy() }
+        let center = NotificationCenter.default
+        // A window becoming key means one is open: this signal may only promote.
+        center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                if Self.isAppWindowOpen { Self.setActivationPolicy(.regular) }
+            }
+        }
+        // Demote only after a window closes, on the next run loop turn, once it is gone.
+        center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in
+                if !Self.isAppWindowOpen { Self.setActivationPolicy(.accessory) }
             }
         }
     }
 
-    private static func updateActivationPolicy() {
-        let appWindowOpen = NSApp.windows.contains { window in
-            guard window.isVisible, let identifier = window.identifier?.rawValue else { return false }
+    private static var isAppWindowOpen: Bool {
+        NSApp.windows.contains { window in
+            guard window.isVisible || window.isMiniaturized, let identifier = window.identifier?.rawValue else { return false }
             return ["meetings", "about", "Settings"].contains { identifier.contains($0) }
         }
-        let policy: NSApplication.ActivationPolicy = appWindowOpen ? .regular : .accessory
+    }
+
+    private static func setActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
         if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
     }
 

@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Keeps `<notes folder>/.minutes/dictionary.md`, the map AI agents read before the notes (design D10).
-/// Built from front matter (`NoteIndex`) and summary types only; rewritten atomically 2 s after any of
+/// Built from front matter (`NoteIndex`), summary types and the glossary only; rewritten atomically 2 s after any of
 /// them changes, whether or not a skill is installed.
 @MainActor
 final class NotesDictionary {
@@ -11,11 +11,13 @@ final class NotesDictionary {
 
     private let index: NoteIndex
     private let summaryTypes: SummaryTypeStore
+    private let glossary: GlossaryStore
     private var pendingWrite: Task<Void, Never>?
     private var lastWritten: (folder: URL, body: String)?
 
-    init(index: NoteIndex, summaryTypes: SummaryTypeStore) {
+    init(index: NoteIndex, summaryTypes: SummaryTypeStore, glossary: GlossaryStore) {
         self.index = index
+        self.glossary = glossary
         self.summaryTypes = summaryTypes
         observeChanges()
         scheduleWrite()
@@ -27,7 +29,7 @@ final class NotesDictionary {
 
     private func observeChanges() {
         withObservationTracking {
-            _ = (index.notes, index.folder, summaryTypes.types)
+            _ = (index.notes, index.folder, summaryTypes.types, glossary.entries)
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.scheduleWrite()
@@ -70,6 +72,9 @@ final class NotesDictionary {
         var sections = [Self.noteFormat]
         sections.append(tagSection("Client tags", counts.filter { $0.key.hasPrefix("client/") }))
         sections.append(tagSection("Topic tags", counts.filter { !$0.key.hasPrefix("client/") }))
+        sections.append("## Glossary\n\nName corrections applied to new transcripts (heard as → correct spelling).\n\n" + (glossary.entries.isEmpty ? "None.\n" : table(
+            ["Heard as", "Correct spelling"], glossary.entries.map { [$0.from, $0.to] }
+        )))
         sections.append("## Summary types\n\n" + summaryTypes.types.map { "- `\($0.id)`: \($0.name)" }.joined(separator: "\n") + "\n")
         sections.append("## Meetings\n\n\(notes.count) meetings, newest first.\n\n" + table(
             ["Date", "Time", "Title", "Minutes", "Tags", "File"],

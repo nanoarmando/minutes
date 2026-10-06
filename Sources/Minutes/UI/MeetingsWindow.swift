@@ -25,8 +25,12 @@ final class MeetingsModel {
         regeneratingID = note.id
         regenerateError = nil
         defer { regeneratingID = nil }
-        let transcript = await environment.noteIndex.content(of: note).transcript
-        let outcome = await MeetingProcessor.summarize(transcript: transcript, title: note.title, type: type, with: service)
+        // Read from disk: a correction may have just changed the transcript.
+        guard let document = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let outcome = await MeetingProcessor.summarize(
+            transcript: NoteFile.transcriptSection(of: document), type: type,
+            context: environment.meetingContext(for: note, document: document), with: service
+        )
         if let error = outcome.error {
             regenerateError = error
             return

@@ -30,6 +30,9 @@ struct MeetingProcessor: Sendable {
     let parakeet: ParakeetEngine
     let keychain: KeychainStore
     let summaryType: SummaryType
+    /// Client tags already in the notes folder, sent as context.
+    let knownClients: [String]
+    let glossary: [GlossaryEntry]
 
     private static let signalThreshold: Int16 = 64
 
@@ -97,7 +100,12 @@ struct MeetingProcessor: Sendable {
             progress(.separatingSpeakers)
             speakerTurns = try? await Diarizer.speakerTurns(systemAudio: systemAudio)
         }
-        let lines = TranscriptAssembler.assemble(segments: segments, speakerTurns: speakerTurns)
+        // The glossary corrects misheard names before the note is first written, summarized or tagged.
+        let lines = TranscriptAssembler.assemble(segments: segments, speakerTurns: speakerTurns).map { line in
+            var corrected = line
+            corrected.text = GlossaryEntry.apply(glossary, to: line.text)
+            return corrected
+        }
         let duration = max(Double(systemAudio.count) / Double(WavFormat.sampleRate), segments.map(\.end).max() ?? 0)
 
         var meeting = Meeting(
@@ -109,11 +117,16 @@ struct MeetingProcessor: Sendable {
         if let service = SummaryService(endpoint: preferences.summaryEndpoint(keychain: keychain)), !lines.isEmpty {
             progress(.summarizing)
             let transcript = SummaryService.transcriptText(lines)
-            if info.event?.title.isEmpty ?? true, let title = await service.title(transcript: transcript) {
+            var context = MeetingContext(
+                title: info.event?.title ?? "", event: info.event, userEmails: preferences.userEmails,
+                knownClients: knownClients, glossary: glossary, instructions: nil
+            )
+            if info.event?.title.isEmpty ?? true, let title = await service.title(transcript: transcript, context: context) {
                 meeting.title = title
             }
+            context.title = meeting.title
             if preferences.autoSummarize {
-                meeting.summary = await Self.summarize(transcript: transcript, title: meeting.title, type: summaryType, with: service)
+                meeting.summary = await Self.summarize(transcript: transcript, type: summaryType, context: context, with: service)
             }
         }
 
@@ -123,9 +136,9 @@ struct MeetingProcessor: Sendable {
     }
 
     /// Summarizes and returns the outcome, with the provider's error when it fails after retries.
-    static func summarize(transcript: String, title: String, type: SummaryType, with service: SummaryService) async -> SummaryOutcome {
+    static func summarize(transcript: String, type: SummaryType, context: MeetingContext, with service: SummaryService) async -> SummaryOutcome {
         do {
-            let text = try await service.summarize(transcript: transcript, title: title, type: type)
+            let text = try await service.summarize(transcript: transcript, type: type, context: context)
             return SummaryOutcome(text: text, typeID: type.id, model: service.model)
         } catch {
             return SummaryOutcome(typeID: type.id, model: service.model, error: error.localizedDescription)
