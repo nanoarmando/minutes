@@ -120,6 +120,14 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   the transcript section and sidecar segments. The sheet applies in one step (no preview). Instructions are stored
   in the sidecar `instructions`, are not displayed in the detail, pre-fill the sheet, and are sent on every
   regenerate and re-tag.
+- **Call detection:** `Capture/CallDetector` polls Core Audio process objects every 2 s (only while
+  `suggestOnCallDetected` is on): `kAudioHardwarePropertyProcessObjectList`, then each process's input-running flag,
+  PID and bundle ID; Minutes' own PID and processes without a bundle ID are skipped; meeting apps are one constant
+  bundle-ID list matched by case-insensitive prefix. `callStarted` after 10 s of continuous input (once per use);
+  `callEnded` during a recording after a meeting app used input and none has for 10 s (once per recording, re-armed).
+  `AppEnvironment` posts the "call-start" / "call-end" notifications; nothing starts or stops automatically.
+  Calendar suggestions are not deduplicated against call suggestions. Safari captures in a WebKit process
+  (`com.apple.WebKit.*`), which is not in the list.
 - **Dock policy:** decided only by whether a Meetings, Settings or About window is open (visible or minimized),
   never by focus; only a closing window can demote to `.accessory`, and the policy is set only when it changes.
 - **Calendar preferences:** `useCalendar` (off by default), `suggestRecording` (on by default) and

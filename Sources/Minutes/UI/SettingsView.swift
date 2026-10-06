@@ -64,6 +64,7 @@ private struct GeneralSettings: View {
                 TextField("File name pattern", text: environment.binding(\.fileNamePattern))
                 Text("Use {date}, {time} and {title}.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Keep audio recording", isOn: environment.binding(\.keepAudio))
+                Toggle("Suggest recording when a call is detected", isOn: environment.binding(\.suggestOnCallDetected))
             }
             Section("Permissions") {
                 // macOS lists Minutes in a Privacy pane only after Minutes has asked, so "Allow…" asks first.

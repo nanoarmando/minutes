@@ -21,7 +21,9 @@ final class AppEnvironment {
     enum SettingsTab: Hashable { case general, calendar, transcription, summaries, tags, integrations }
 
     private(set) var preferences = Preferences.load()
-    private(set) var status = Status.idle
+    private(set) var status = Status.idle {
+        didSet { callDetector?.setRecording(isRecording) }
+    }
     private(set) var micLevel: Float = 0
     private(set) var systemLevel: Float = 0
     private(set) var elapsed: TimeInterval = 0
@@ -42,6 +44,7 @@ final class AppEnvironment {
     let updates = UpdateCoordinator()
     let glossary = GlossaryStore()
     @ObservationIgnored private var dictionary: NotesDictionary?
+    @ObservationIgnored private var callDetector: CallDetector?
     /// Set by a scene view, which is where SwiftUI exposes the window actions.
     @ObservationIgnored var openWindow: ((String) -> Void)?
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
@@ -60,6 +63,10 @@ final class AppEnvironment {
         updates.isAppBusy = { [weak self] in self?.isBusy ?? false }
         updates.start()
         observeWindowsForDock()
+        callDetector = CallDetector { [weak self] event in
+            Task { @MainActor in self?.suggest(for: event) }
+        }
+        callDetector?.setEnabled(preferences.suggestOnCallDetected)
         Task { [weak self] in
             for await state in modelStates { self?.modelState = state }
         }
@@ -130,12 +137,17 @@ final class AppEnvironment {
         update(&preferences)
         preferences.save()
         calendar.preferences = preferences
+        callDetector?.setEnabled(preferences.suggestOnCallDetected)
         noteIndex.setFolder(preferences.notesFolder)
         if preferences.notesFolder != previousFolder {
             AgentIntegrations.updateInstalled(notesFolder: preferences.notesFolder)
         updates.isAppBusy = { [weak self] in self?.isBusy ?? false }
         updates.start()
         observeWindowsForDock()
+        callDetector = CallDetector { [weak self] event in
+            Task { @MainActor in self?.suggest(for: event) }
+        }
+        callDetector?.setEnabled(preferences.suggestOnCallDetected)
         }
         if meetingsWaitingForFolder > 0 {
             Task { await finishInterruptedMeetings() }
@@ -240,6 +252,20 @@ final class AppEnvironment {
     func stopRecording() {
         guard isRecording, let session else { return }
         Task { await session.stop() }
+    }
+
+    /// Suggests starting when a call is detected and nothing is recorded or processed, and stopping when the call
+    /// seems to have ended during a recording. Never starts or stops by itself.
+    private func suggest(for event: CallDetector.Event) {
+        guard preferences.suggestOnCallDetected else { return }
+        switch event {
+        case .callStarted(let appName) where !isBusy:
+            MeetingNotifications.postCallStarted(appName: appName)
+        case .callEnded where isRecording:
+            MeetingNotifications.postCallEnded()
+        default:
+            break
+        }
     }
 
     /// Deletes the current recording. The confirmation dialog is shown by the caller.

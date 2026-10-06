@@ -95,11 +95,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let action = response.actionIdentifier
         let meetingID = (userInfo[MeetingNotifications.meetingIDKey] as? String).flatMap(UUID.init(uuidString:))
         let event = MeetingNotifications.event(from: userInfo)
+        let category = response.notification.request.content.categoryIdentifier
+        // For suggestions only the actions do something; clicking the notification body does nothing.
         Task { @MainActor in
-            if let event {
-                // Only the action starts a recording; clicking the notification body does nothing.
-                if action == MeetingNotifications.startRecordingAction { self.environment.startRecording(event: event) }
-            } else {
+            switch category {
+            case MeetingNotifications.eventCategory:
+                if action == MeetingNotifications.startRecordingAction, let event { self.environment.startRecording(event: event) }
+            case MeetingNotifications.callStartCategory:
+                if action == MeetingNotifications.startRecordingAction { self.environment.startRecording() }
+            case MeetingNotifications.callEndCategory:
+                if action == MeetingNotifications.stopRecordingAction { self.environment.stopRecording() }
+            default:
                 self.environment.showMeetings(selecting: meetingID)
             }
         }

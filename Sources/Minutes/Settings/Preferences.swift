@@ -8,6 +8,7 @@ struct Preferences: Codable, Sendable, Equatable {
     var notesFolder = URL.documentsDirectory.appendingPathComponent("Minutes", isDirectory: true)
     var fileNamePattern = "{date} {time} {title}"
     var keepAudio = false
+    var suggestOnCallDetected = true
     var useCalendar = false
     var suggestRecording = true
     /// Stored as unfollowed identifiers so calendars added later are followed by default.

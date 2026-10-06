@@ -153,6 +153,13 @@ create.
 
 For a fully local setup, keep transcription on this Mac and use the Ollama preset (`http://localhost:11434/v1`).
 
+### Unscheduled calls
+
+When Zoom, Teams, Slack, Webex, FaceTime, Discord or a browser uses the microphone for 10 seconds and you are not
+recording, Minutes asks **Are you in a meeting?** with **Start recording**. While recording, when the call releases
+the microphone for 10 seconds, it asks **Did the meeting end?** with **Stop & summarize**. Minutes never starts or
+stops a recording by itself. Turn it off in Settings › General › "Suggest recording when a call is detected".
+
 ### Correcting a meeting
 
 Automatic transcription can mishear names. Every summary, title and tag request includes what Minutes knows about
