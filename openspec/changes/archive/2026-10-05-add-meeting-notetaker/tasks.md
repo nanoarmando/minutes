@@ -121,4 +121,4 @@
 - [ ] 12.2 Manual check: API engine against OpenAI, summaries and tags against Ollama and DeepSeek, provider offline path; record during a calendar event with guests and a Meet link, start one from the start notification; install the skill in Claude Code and Codex and ask a question about a past meeting
 - [ ] 12.3 Manual check: crash recovery (kill during recording), 500-note folder opens in under one second
 - [x] 12.4 Write README.md (install, signing setup, usage, privacy) and AGENTS.md (structure, conventions, contracts)
-- [ ] 12.5 Create the public GitHub repository `nanoarmando/minutes`, push, and publish release v0.1.0 with its DMG
+- [x] 12.5 Create the public GitHub repository `nanoarmando/minutes`, push, and publish release v0.1.0 with its DMG

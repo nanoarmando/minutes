@@ -26,6 +26,20 @@ choose.
 
 ## Install
 
+### Download
+
+Download `Minutes-<version>.dmg` from the [latest release](https://github.com/nanoarmando/minutes/releases/latest),
+drag Minutes to Applications, and clear the quarantine flag once (the app is self-signed, not notarized):
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Minutes.app
+```
+
+Later versions install from About › Install update.
+
+### Build from source
+
+
 Minutes is built and signed on your own Mac. There is no notarized download.
 
 ### Signing setup
