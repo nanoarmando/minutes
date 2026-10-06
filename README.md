@@ -42,7 +42,7 @@ Later versions install from About › Install update.
 
 Minutes is built and signed on your own Mac. There is no notarized download.
 
-### Signing setup
+#### Signing setup
 
 Minutes is signed with a stable self-signed identity called `Minutes Self-Signed`. Using the same identity on
 every build makes macOS remember the microphone, system audio and calendar permissions across rebuilds. Create it
@@ -78,7 +78,7 @@ security find-identity -p codesigning | grep "Minutes Self-Signed"
 If the identity is lost and created again, macOS treats the next build as a new app: grant the permissions once
 more.
 
-### Build
+#### Build
 
 ```sh
 ./Scripts/build.sh
