@@ -16,6 +16,13 @@ struct MeetingDetailView: View {
     @State private var instructions: String?
     @State private var isCorrecting = false
     @State private var isRetagging = false
+    /// The summary language stored in the sidecar ("en", "es"); nil for Auto.
+    @State private var language: String?
+    @State private var editedTitle: String?
+    @State private var titleError: String?
+    @FocusState private var isTitleFocused: Bool
+
+    private static let languageChoices: [(code: String?, name: String)] = [(nil, "Auto"), ("en", "English"), ("es", "Español")]
 
     private static let readingWidth: CGFloat = 720
 
@@ -48,6 +55,7 @@ struct MeetingDetailView: View {
             let sidecar = NoteWriter(folder: note.url.deletingLastPathComponent()).readSidecar(id: note.id)
             taggingFailure = sidecar?.tagging?.lastError
             instructions = sidecar?.instructions
+            language = sidecar?.language
         }
         .sheet(isPresented: $isCorrecting) {
             CorrectionSheet(environment: environment, model: model, note: note, instructions: instructions ?? "")
@@ -59,7 +67,7 @@ struct MeetingDetailView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(note.title).font(.largeTitle.weight(.semibold)).textSelection(.enabled)
+                title
                 Text(meta).foregroundStyle(.secondary)
                 if note.recovered {
                     Label("Recovered after Minutes quit unexpectedly", systemImage: "exclamationmark.arrow.circlepath")
@@ -80,6 +88,43 @@ struct MeetingDetailView: View {
             }
             .padding(.top, 10)
         }
+    }
+
+    private var isBusy: Bool { model.regeneratingID == note.id || isRetagging }
+
+    /// Click to edit; Enter saves, Escape or leaving the field cancels.
+    @ViewBuilder private var title: some View {
+        if let editedTitle {
+            TextField("Title", text: Binding(get: { editedTitle }, set: { self.editedTitle = $0 }))
+                .font(.largeTitle.weight(.semibold))
+                .textFieldStyle(.plain)
+                .focused($isTitleFocused)
+                .onSubmit(saveTitle)
+                .onExitCommand { self.editedTitle = nil }
+                .onChange(of: isTitleFocused) { _, focused in if !focused { self.editedTitle = nil } }
+                .onAppear { isTitleFocused = true }
+        } else {
+            Text(note.title).font(.largeTitle.weight(.semibold))
+                .onTapGesture {
+                    guard !isBusy else { return }
+                    titleError = nil
+                    editedTitle = note.title
+                }
+        }
+        if let titleError { Text(titleError).font(.caption).foregroundStyle(.red) }
+    }
+
+    private func saveTitle() {
+        let title = editedTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        editedTitle = nil
+        guard !title.isEmpty, title != note.title, !isBusy else { return }
+        let writer = NoteWriter(folder: note.url.deletingLastPathComponent(), fileNamePattern: environment.preferences.fileNamePattern)
+        do {
+            _ = try writer.updateTitle(of: note.url, date: note.date, to: title)
+        } catch {
+            titleError = error.localizedDescription
+        }
+        environment.noteIndex.rescan()
     }
 
     /// "Mon, Oct 5, 2026 · 09:30 · 11 min · You + 4 speakers"
@@ -187,8 +232,15 @@ struct MeetingDetailView: View {
                 }
             }
             Spacer()
+            Menu("Language: \(Self.languageChoices.first { $0.code == language }?.name ?? "Auto")") {
+                ForEach(Self.languageChoices, id: \.name) { choice in
+                    Button(choice.name) { setLanguage(choice.code) }
+                }
+            }
+            .fixedSize()
+            .disabled(isRetagging)
             Button("Regenerate", systemImage: "arrow.clockwise") {
-                regenerate(environment.summaryTypes.type(id: note.summaryType ?? "") ?? environment.summaryTypes.defaultType)
+                regenerate(currentType)
             }
             .buttonStyle(.borderedProminent)
         }
@@ -215,6 +267,26 @@ struct MeetingDetailView: View {
         } else {
             MarkdownText(text)
         }
+    }
+
+    /// Stores the choice first, so it is kept for the next attempt when the summary or tagging fails.
+    private func setLanguage(_ code: String?) {
+        guard environment.summaryService != nil else { return regenerate(currentType) }
+        do {
+            try NoteWriter(folder: note.url.deletingLastPathComponent()).updateSidecar(id: note.id) { $0.language = code }
+        } catch {
+            tagError = error.localizedDescription
+            return
+        }
+        language = code
+        Task {
+            await model.regenerate(note, type: currentType)
+            if model.regenerateError == nil { retag() }
+        }
+    }
+
+    private var currentType: SummaryType {
+        environment.summaryTypes.type(id: note.summaryType ?? "") ?? environment.summaryTypes.defaultType
     }
 
     private func regenerate(_ type: SummaryType) {

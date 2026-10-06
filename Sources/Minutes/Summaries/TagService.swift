@@ -50,7 +50,7 @@ struct TagService: Sendable {
 
     private func modelTags(transcript: String, context: MeetingContext, service: SummaryService) async throws -> (clients: [String], topics: [String]) {
         let reply = try await service.client.complete(
-            system: prompt(language: MeetingLanguage(of: transcript), context: context),
+            system: prompt(language: context.language, context: context),
             user: context.message(transcript: Self.excerpt(transcript)), maxTokens: 300
         )
         struct Reply: Decodable { var clients: [String]?; var topics: [String]? }

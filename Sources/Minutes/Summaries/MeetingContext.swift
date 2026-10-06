@@ -13,6 +13,8 @@ struct MeetingContext: Sendable {
     var knownClients: [String] = []
     var glossary: [GlossaryEntry] = []
     var instructions: String?
+    /// The summary language the user chose for the meeting ("en", "es"); nil means detect it from the transcript.
+    var chosenLanguage: String?
 
     /// The context of a meeting from its calendar event, else the attendees listed in front matter.
     init(title: String, event: EventInfo?, frontMatterAttendees: [String] = [], userEmails: [String],
@@ -44,12 +46,17 @@ struct MeetingContext: Sendable {
     static func forNote(_ url: URL, id: UUID, document: String, userEmails: [String], knownClients: [String], glossary: [GlossaryEntry]) -> MeetingContext {
         let sidecar = NoteWriter(folder: url.deletingLastPathComponent()).readSidecar(id: id)
         let frontMatter = NoteFile.frontMatter(of: document)
-        return MeetingContext(
+        var context = MeetingContext(
             title: frontMatter?.scalars["title"] ?? sidecar?.event?.title ?? "", event: sidecar?.event,
             frontMatterAttendees: frontMatter?.lists["attendees"] ?? [], userEmails: userEmails,
             knownClients: knownClients, glossary: glossary, instructions: sidecar?.instructions
         )
+        context.chosenLanguage = sidecar?.language
+        return context
     }
+
+    /// The language the user chose for summaries, titles and topic tags; nil lets the model judge it.
+    var language: MeetingLanguage? { chosenLanguage.flatMap(MeetingLanguage.init(code:)) }
 
     /// The block placed before the transcript; empty lines are left out.
     var block: String {
@@ -65,8 +72,9 @@ struct MeetingContext: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    /// The user message: context, then the transcript.
+    /// The user message: context, then the transcript. The preamble is repeated after a long transcript because
+    /// models (DeepSeek with reasoning in particular) otherwise drift back to English.
     func message(transcript: String, preamble: String? = nil) -> String {
-        [preamble, block, "Transcript:\n" + transcript].compactMap { $0 }.joined(separator: "\n\n")
+        [preamble, block, "Transcript:\n" + transcript, preamble].compactMap { $0 }.joined(separator: "\n\n")
     }
 }

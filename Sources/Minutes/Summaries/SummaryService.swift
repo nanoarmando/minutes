@@ -19,16 +19,16 @@ struct SummaryService: Sendable {
 
     /// Summaries use the provider's reasoning mode, with a budget large enough for the reasoning and the answer.
     func summarize(transcript: String, type: SummaryType, context: MeetingContext) async throws -> String {
-        let instruction = MeetingLanguage.summaryInstruction(MeetingLanguage(of: transcript))
+        let instruction = MeetingLanguage.summaryInstruction(context.language)
         let system = Self.baseInstructions + "\n" + instruction + "\n\n" + type.instructions
         return try await client.complete(
-            system: system, user: context.message(transcript: transcript, preamble: instruction), maxTokens: 16_000, reasoning: true
+            system: system, user: context.message(transcript: transcript, preamble: instruction), maxTokens: nil, reasoning: true
         )
     }
 
     /// A short title generated from opening, middle and closing excerpts; nil on any failure.
     func title(transcript: String, context: MeetingContext) async -> String? {
-        let language = "Write the title " + MeetingLanguage.phrase(MeetingLanguage(of: transcript)) + "."
+        let language = "Write the title " + MeetingLanguage.phrase(context.language) + "."
         guard let raw = try? await client.complete(
             system: Self.titleInstructions + " " + language,
             user: context.message(transcript: Self.titleExcerpt(transcript), preamble: language), maxTokens: 60

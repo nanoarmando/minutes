@@ -7,7 +7,9 @@ enum MeetingNotifications {
     static let meetingIDKey = "meetingID"
     static let eventKey = "event"
     static let eventCategory = "event-starting"
+    static let eventWhileRecordingCategory = "event-starting-recording"
     static let startRecordingAction = "start-recording"
+    static let stopAndRecordNextAction = "stop-and-record-next"
     static let callStartCategory = "call-start"
     static let callEndCategory = "call-end"
     static let stopRecordingAction = "stop-recording"
@@ -22,6 +24,9 @@ enum MeetingNotifications {
         let dismiss = UNNotificationAction(identifier: "dismiss", title: "Dismiss")
         center.setNotificationCategories([
             UNNotificationCategory(identifier: eventCategory, actions: [start, dismiss], intentIdentifiers: []),
+            UNNotificationCategory(identifier: eventWhileRecordingCategory, actions: [
+                UNNotificationAction(identifier: stopAndRecordNextAction, title: "Stop & record next"), dismiss,
+            ], intentIdentifiers: []),
             UNNotificationCategory(identifier: callStartCategory, actions: [start, dismiss], intentIdentifiers: []),
             UNNotificationCategory(identifier: callEndCategory, actions: [
                 UNNotificationAction(identifier: stopRecordingAction, title: "Stop & summarize"),
@@ -42,11 +47,12 @@ enum MeetingNotifications {
         post(content, id: note.id.uuidString)
     }
 
-    static func postEventStarting(_ event: EventInfo, occurrence: String) {
+    /// The notification identifier is the occurrence, which "Stop & record next" uses to recognize the current recording.
+    static func postEventStarting(_ event: EventInfo, occurrence: String, whileRecording: Bool) {
         let content = UNMutableNotificationContent()
-        content.title = "\(event.title) is starting"
-        content.body = "Record this meeting with Minutes?"
-        content.categoryIdentifier = eventCategory
+        content.title = "\(event.title) starts in 1 minute"
+        content.body = whileRecording ? "Stop the current recording and record this meeting?" : "Record this meeting with Minutes?"
+        content.categoryIdentifier = whileRecording ? eventWhileRecordingCategory : eventCategory
         content.userInfo = [eventKey: (try? JSONEncoder().encode(event)) ?? Data()]
         post(content, id: occurrence)
     }

@@ -38,7 +38,7 @@ struct NoteWriter: Sendable {
             tagging: taggingPending ? TaggingState(pending: true) : nil
         ))
 
-        let url = availableURL(for: meeting)
+        let url = availableURL(date: meeting.date, title: meeting.title)
         try Data(NoteFile.render(meeting, audioPath: audioPath).utf8).write(to: url, options: .atomic)
         return url
     }
@@ -56,6 +56,17 @@ struct NoteWriter: Sendable {
         try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: true)
         sidecar.summaries.append(.init(typeID: summary.typeID, model: summary.model, date: summary.date, error: summary.error))
         try writeSidecar(sidecar)
+    }
+
+    /// Sets the title in the front matter and the first-level heading (when still present), then renames the file
+    /// after the new title. Returns the note's URL; when the rename fails the title change is kept and the error thrown.
+    func updateTitle(of noteURL: URL, date: Date, to title: String) throws -> URL {
+        let document = try String(contentsOf: noteURL, encoding: .utf8)
+        try Data(NoteFile.settingTitle(title, in: document).utf8).write(to: noteURL, options: .atomic)
+        let target = availableURL(date: date, title: title, current: noteURL)
+        guard target.standardizedFileURL != noteURL.standardizedFileURL else { return noteURL }
+        try FileManager.default.moveItem(at: noteURL, to: target)
+        return target
     }
 
     /// Writes the note's tags and records which of them were added by hand.
@@ -113,15 +124,16 @@ struct NoteWriter: Sendable {
         guard manager.isWritableFile(atPath: folder.path) else { throw WriteError.folderUnavailable(folder) }
     }
 
-    private func availableURL(for meeting: Meeting) -> URL {
+    /// The pattern-derived file name with " 2", " 3"… on a collision; `current` (the note being renamed) is not one.
+    private func availableURL(date: Date, title: String, current: URL? = nil) -> URL {
         let base = fileNamePattern
-            .replacingOccurrences(of: "{date}", with: NoteFile.format(meeting.date, "yyyy-MM-dd"))
-            .replacingOccurrences(of: "{time}", with: NoteFile.format(meeting.date, "HHmm"))
-            .replacingOccurrences(of: "{title}", with: meeting.title)
+            .replacingOccurrences(of: "{date}", with: NoteFile.format(date, "yyyy-MM-dd"))
+            .replacingOccurrences(of: "{time}", with: NoteFile.format(date, "HHmm"))
+            .replacingOccurrences(of: "{title}", with: title)
         let name = Self.sanitizedFileName(base)
         var candidate = folder.appendingPathComponent("\(name).md")
         var suffix = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
+        while candidate.standardizedFileURL != current?.standardizedFileURL, FileManager.default.fileExists(atPath: candidate.path) {
             candidate = folder.appendingPathComponent("\(name) \(suffix).md")
             suffix += 1
         }

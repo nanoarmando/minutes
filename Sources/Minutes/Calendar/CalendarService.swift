@@ -42,13 +42,14 @@ final class CalendarService {
     private static let meetingHosts = ["zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com", "webex.com"]
     private static let lookAhead: TimeInterval = 7 * 24 * 3600
     private static let wakeGrace: TimeInterval = 5 * 60
+    private static let leadTime: TimeInterval = 60
 
     private(set) var authorization = EKEventStore.authorizationStatus(for: .event)
     /// Calendars grouped by account (`source.title`), for Settings.
     private(set) var calendarsByAccount: [(account: String, calendars: [EKCalendar])] = []
 
     @ObservationIgnored var preferences: Preferences { didSet { reload() } }
-    /// Suggestions are never posted while this returns true.
+    /// Picks the "Stop & record next" variant of a suggestion while this returns true.
     @ObservationIgnored var isRecording: () -> Bool = { false }
     @ObservationIgnored private let store = EKEventStore()
     @ObservationIgnored private var timer: Task<Void, Never>?
@@ -63,10 +64,7 @@ final class CalendarService {
                 MainActor.assumeIsolated { self?.reload() }
             },
             NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.suggestEvents(startedSince: Date().addingTimeInterval(-Self.wakeGrace))
-                    self?.reload()
-                }
+                MainActor.assumeIsolated { self?.reload() }
             },
         ]
         reload()
@@ -113,29 +111,34 @@ final class CalendarService {
             .filter { !$0.isAllDay }
     }
 
-    /// One timer for the next start of a qualifying event (a meeting link or at least one attendee).
+    /// Suggests what is already due (launch, late calendar changes, wake), then one timer for the next suggestion
+    /// moment: `leadTime` before the start of a qualifying event (a meeting link or at least one attendee).
     private func planNextSuggestion() {
         timer?.cancel()
         guard isActive, preferences.suggestRecording else { return }
+        suggestDueEvents()
         let now = Date()
         guard let next = events(from: now, to: now.addingTimeInterval(Self.lookAhead))
-            .filter({ $0.startDate > now && Self.qualifies($0) }).map(\.startDate).min() else { return }
+            .filter({ $0.startDate.addingTimeInterval(-Self.leadTime) > now && Self.qualifies($0) })
+            .map({ $0.startDate.addingTimeInterval(-Self.leadTime) }).min() else { return }
         timer = Task { [weak self] in
+            // Re-planning also posts what became due, so an early wake-up of the sleep only re-arms the timer.
             try? await Task.sleep(for: .seconds(next.timeIntervalSinceNow))
             guard !Task.isCancelled else { return }
-            self?.suggestEvents(startedSince: next.addingTimeInterval(-1))
             self?.planNextSuggestion()
         }
     }
 
-    private func suggestEvents(startedSince since: Date) {
-        guard isActive, preferences.suggestRecording, !isRecording() else { return }
+    /// Events whose suggestion moment has passed and that started less than `wakeGrace` ago.
+    private func suggestDueEvents() {
+        guard isActive, preferences.suggestRecording else { return }
         let now = Date()
-        for event in events(from: since, to: now.addingTimeInterval(1))
-        where event.startDate >= since && event.startDate <= now && Self.qualifies(event) {
+        let since = now.addingTimeInterval(-Self.wakeGrace)
+        for event in events(from: since, to: now.addingTimeInterval(Self.leadTime + 1))
+        where event.startDate > since && event.startDate.addingTimeInterval(-Self.leadTime) <= now && Self.qualifies(event) {
             let occurrence = "\(event.eventIdentifier ?? "")@\(event.startDate.timeIntervalSince1970)"
             guard notified.insert(occurrence).inserted else { continue }
-            MeetingNotifications.postEventStarting(info(event), occurrence: occurrence)
+            MeetingNotifications.postEventStarting(info(event), occurrence: occurrence, whileRecording: isRecording())
         }
     }
 

@@ -97,6 +97,16 @@ enum NoteFile {
         return lines.joined(separator: "\n")
     }
 
+    /// Replaces the `title` front matter value and the body's first `# ` heading; no heading is added when missing.
+    static func settingTitle(_ title: String, in document: String) -> String {
+        var lines = settingFrontMatter([("title", quoted(title))], in: document).components(separatedBy: "\n")
+        let bodyStart = lines.first == "---" ? (lines.dropFirst().firstIndex(of: "---") ?? 0) + 1 : 0
+        if let heading = lines[bodyStart...].firstIndex(where: { $0.hasPrefix("# ") }) {
+            lines[heading] = "# " + title
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// Replaces the `tags` list (Obsidian block form) in the front matter.
     static func settingTags(_ tags: [String], in document: String) -> String {
         var lines = document.components(separatedBy: "\n")

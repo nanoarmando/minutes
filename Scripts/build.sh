@@ -48,6 +48,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>LSUIElement</key><true/>
+  <key>NSUserNotificationAlertStyle</key><string>alert</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Minutes records your voice during the meetings you choose to record.</string>
   <key>NSAudioCaptureUsageDescription</key><string>Minutes records the other participants of the meetings you choose to record from the audio played by your Mac.</string>

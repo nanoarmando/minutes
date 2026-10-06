@@ -6,16 +6,29 @@ extension KeyboardShortcuts.Name {
     static let toggleRecording = Self("toggleRecording", initial: .init(.r, modifiers: [.command, .shift]))
 }
 
-/// Composition root: owns the long-lived services and the current recording, turns session events into
+/// Composition root: owns the long-lived services, the current recording and the stopped meetings still shown in
+/// the menu, turns session events into
 /// observable state, and routes navigation between the menu, the Meetings window and Settings.
 @MainActor @Observable
 final class AppEnvironment {
     enum Status: Equatable {
         case idle
         case recording(since: Date)
-        case processing(ProcessingStep)
-        case finished(FinishResult)
         case startFailed(String)
+    }
+
+    /// A meeting whose capture has stopped: processing in the background, or finished and shown in the menu.
+    struct StoppedMeeting: Identifiable {
+        enum Phase: Equatable {
+            case processing(ProcessingStep)
+            case finished(FinishResult)
+        }
+
+        let session: RecordingSession
+        /// The calendar event title, or the start time when there is no event.
+        let name: String
+        var phase: Phase
+        var id: UUID { session.id }
     }
 
     enum SettingsTab: Hashable { case general, calendar, transcription, summaries, tags, integrations }
@@ -24,6 +37,8 @@ final class AppEnvironment {
     private(set) var status = Status.idle {
         didSet { callDetector?.setRecording(isRecording) }
     }
+    /// In stop order. Saved and waiting-for-folder entries are removed when the next recording starts.
+    private(set) var stopped: [StoppedMeeting] = []
     private(set) var micLevel: Float = 0
     private(set) var systemLevel: Float = 0
     private(set) var elapsed: TimeInterval = 0
@@ -48,7 +63,13 @@ final class AppEnvironment {
     /// Set by a scene view, which is where SwiftUI exposes the window actions.
     @ObservationIgnored var openWindow: ((String) -> Void)?
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
+    /// The current recording, also while it is starting or stopping.
     @ObservationIgnored private var session: RecordingSession?
+    @ObservationIgnored private var currentEvent: EventInfo?
+    /// The calendar occurrence the current recording was started for from a notification.
+    @ObservationIgnored private var currentOccurrence: String?
+    /// Set while the current recording's capture is stopping, so a second caller waits for it.
+    @ObservationIgnored private var stopping: Task<RecordingSession, Never>?
     @ObservationIgnored private var retagTask: Task<Void, Never>?
     @ObservationIgnored private var sleepObserver: NSObjectProtocol?
 
@@ -89,10 +110,7 @@ final class AppEnvironment {
     }
 
     var isBusy: Bool {
-        switch status {
-        case .recording, .processing: true
-        default: false
-        }
+        isRecording || stopped.contains { if case .processing = $0.phase { true } else { false } }
     }
 
     /// Nil when no summary provider is configured.
@@ -141,13 +159,6 @@ final class AppEnvironment {
         noteIndex.setFolder(preferences.notesFolder)
         if preferences.notesFolder != previousFolder {
             AgentIntegrations.updateInstalled(notesFolder: preferences.notesFolder)
-        updates.isAppBusy = { [weak self] in self?.isBusy ?? false }
-        updates.start()
-        observeWindowsForDock()
-        callDetector = CallDetector { [weak self] event in
-            Task { @MainActor in self?.suggest(for: event) }
-        }
-        callDetector?.setEnabled(preferences.suggestOnCallDetected)
         }
         if meetingsWaitingForFolder > 0 {
             Task { await finishInterruptedMeetings() }
@@ -226,17 +237,27 @@ final class AppEnvironment {
     }
 
     /// `event` comes from a start suggestion; otherwise the calendar is looked up once capture has started.
-    func startRecording(event: EventInfo? = nil) {
-        guard !isBusy else { return }
+    /// Earlier meetings keep processing; their saved confirmations leave the menu.
+    func startRecording(event: EventInfo? = nil, occurrence: String? = nil) {
+        guard session == nil else { return }
         let session = RecordingSession(preferences: preferences, processor: processor)
         self.session = session
+        currentEvent = event
+        currentOccurrence = occurrence
         elapsed = 0
+        stopped.removeAll {
+            switch $0.phase {
+            case .finished(.saved), .finished(.waitingForFolder): true
+            default: false
+            }
+        }
         Task {
-            consume(session.events)
+            consume(session.events, id: session.id)
             do {
                 let startDate = Date()
                 try await session.start(event: event)
                 if event == nil, let found = calendar.event(at: startDate) {
+                    currentEvent = found
                     await session.setEvent(found)
                 }
                 if preferences.engine == .parakeet, !ParakeetEngine.isInstalled {
@@ -250,16 +271,53 @@ final class AppEnvironment {
     }
 
     func stopRecording() {
-        guard isRecording, let session else { return }
-        Task { await session.stop() }
+        Task { await stopCurrent()?.process() }
     }
 
-    /// Suggests starting when a call is detected and nothing is recorded or processed, and stopping when the call
+    /// "Stop & record next": stops the current recording, which is processed in the background, and records
+    /// `event` once the previous capture is down. Does nothing when the current recording is already that event.
+    func stopAndRecordNext(event: EventInfo, occurrence: String) {
+        if isRecording, currentOccurrence == occurrence || (currentOccurrence == nil && currentEvent == event) { return }
+        Task {
+            if let previous = await stopCurrent() {
+                Task { await previous.process() }
+            }
+            startRecording(event: event, occurrence: occurrence)
+        }
+    }
+
+    /// Stops capture of the current recording and moves it to `stopped`; returns it for processing. A caller that
+    /// arrives during a stop waits for it and gets nil, since the first caller processes the session.
+    private func stopCurrent() async -> RecordingSession? {
+        if let stopping {
+            _ = await stopping.value
+            return nil
+        }
+        guard isRecording, let session, case .recording(let since) = status else { return nil }
+        let name = currentEvent?.title ?? since.formatted(date: .omitted, time: .shortened)
+        // The cleanup runs inside the task, so waiters resume only after `session` is cleared.
+        let task = Task {
+            await session.stopCapture()
+            stopped.append(StoppedMeeting(session: session, name: name, phase: .processing(.transcribing)))
+            self.session = nil
+            currentEvent = nil
+            currentOccurrence = nil
+            status = .idle
+            micLevel = 0
+            systemLevel = 0
+            stopping = nil
+            return session
+        }
+        stopping = task
+        return await task.value
+    }
+
+    /// Suggests starting when a call is detected and nothing is recorded, and stopping when the call
     /// seems to have ended during a recording. Never starts or stops by itself.
     private func suggest(for event: CallDetector.Event) {
         guard preferences.suggestOnCallDetected else { return }
         switch event {
-        case .callStarted(let appName) where !isBusy:
+        case .callStarted(let appName) where !isRecording:
             MeetingNotifications.postCallStarted(appName: appName)
         case .callEnded where isRecording:
             MeetingNotifications.postCallEnded()
@@ -274,58 +332,83 @@ final class AppEnvironment {
         Task { await session.discard() }
     }
 
-    /// Retries a meeting whose transcription failed (for example after the model download failed).
-    func retryProcessing() {
-        guard case .finished(.failed) = status, let session else { return }
+    /// Retries a stopped meeting whose processing failed (for example after the model download failed).
+    func retryProcessing(id: UUID) {
+        guard let index = stopped.firstIndex(where: { $0.id == id }), case .finished(.failed) = stopped[index].phase else { return }
+        let session = stopped[index].session
+        stopped[index].phase = .processing(.transcribing)
         Task {
             _ = try? await parakeet.prepare()
             await session.retry()
         }
     }
 
+    /// Deletes a stopped meeting whose processing failed. The confirmation dialog is shown by the caller.
+    func discardStopped(id: UUID) {
+        guard let meeting = stopped.first(where: { $0.id == id }) else { return }
+        Task { await meeting.session.discard() }
+    }
+
     func downloadModel() {
         Task { _ = try? await parakeet.prepare() }
     }
 
-    /// Called by the Quit handler while recording: stops and saves, or discards, and returns when done.
+    /// Called by the Quit handler while recording: stops and saves, or discards, and returns when done. Meetings
+    /// already processing in the background are recovered at the next launch.
     func endRecordingForQuit(save: Bool) async {
-        guard let session else { return }
-        if save { await session.stop() } else { await session.discard() }
+        if save {
+            await stopCurrent()?.process()
+        } else {
+            await session?.discard()
+        }
     }
 
-    private func consume(_ events: AsyncStream<RecordingSession.Event>) {
+    /// Levels and elapsed time count only for the current recording; state goes to the recording or its stopped entry.
+    private func consume(_ events: AsyncStream<RecordingSession.Event>, id: UUID) {
         Task {
             for await event in events {
                 switch event {
-                case .levels(let mic, let system):
+                case .levels(let mic, let system) where id == session?.id:
                     micLevel = mic
                     systemLevel = system
-                case .elapsed(let seconds):
+                case .elapsed(let seconds) where id == session?.id:
                     elapsed = seconds
                 case .state(let state):
-                    apply(state)
+                    apply(state, id: id)
+                default:
+                    break
                 }
             }
         }
     }
 
-    private func apply(_ state: RecordingSession.State) {
+    private func apply(_ state: RecordingSession.State, id: UUID) {
+        if id == session?.id {
+            switch state {
+            case .recording(let since):
+                status = .recording(since: since)
+            case .discarded:
+                status = .idle
+                session = nil
+                currentEvent = nil
+                currentOccurrence = nil
+            case .processing, .finished:
+                break  // the stopped entry, created once capture is down, tracks processing
+            }
+            return
+        }
+        guard let index = stopped.firstIndex(where: { $0.id == id }) else { return }
         switch state {
-        case .recording(let since):
-            status = .recording(since: since)
         case .processing(let step):
-            status = .processing(step)
-            micLevel = 0
-            systemLevel = 0
+            stopped[index].phase = .processing(step)
         case .finished(let result):
-            status = .finished(result)
+            stopped[index].phase = .finished(result)
             if case .waitingForFolder = result { meetingsWaitingForFolder += 1 }
-            if case .failed = result { return }
-            session = nil
             if case .saved(let note) = result { didSave(note) }
         case .discarded:
-            status = .idle
-            session = nil
+            stopped.remove(at: index)
+        case .recording:
+            break
         }
     }
 
@@ -428,6 +511,10 @@ final class AppEnvironment {
     }
 
     private func isActive(_ store: InProgressStore) -> Bool {
-        store.folder.lastPathComponent == session?.id.uuidString
+        let id = store.folder.lastPathComponent
+        // A meeting waiting for a folder is finished by its session and left to recovery.
+        return id == session?.id.uuidString || stopped.contains {
+            if case .finished(.waitingForFolder) = $0.phase { false } else { $0.id.uuidString == id }
+        }
     }
 }

@@ -58,6 +58,8 @@ struct Sidecar: Codable, Sendable {
     var tagging: TaggingState? = nil
     /// Instructions the user gave for this meeting, sent as context on every regeneration and re-tag.
     var instructions: String? = nil
+    /// The summary language the user chose ("en" or "es"); absent for Auto.
+    var language: String? = nil
 }
 
 /// Whether automatic tagging still has to run for a note (pending until an attempt succeeds) and why it last failed.

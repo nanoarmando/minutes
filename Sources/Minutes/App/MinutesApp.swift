@@ -68,9 +68,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if MeetingNotifications.isAvailable { UNUserNotificationCenter.current().delegate = self }
     }
 
-    /// While recording, Quit asks whether to save or discard and quits only after that action completes.
+    /// While recording, Quit asks whether to save or discard and quits only after that action completes. While a
+    /// stopped meeting is still processing, it offers to wait; quitting anyway leaves it to recovery at launch.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard environment.isRecording else { return .terminateNow }
+        guard environment.isRecording else {
+            guard environment.isBusy else { return .terminateNow }
+            let alert = NSAlert()
+            alert.messageText = "A meeting is still being processed"
+            alert.informativeText = "Quitting now finishes it the next time Minutes opens."
+            alert.addButton(withTitle: "Wait")
+            alert.addButton(withTitle: "Quit anyway")
+            NSApp.activate()
+            return alert.runModal() == .alertFirstButtonReturn ? .terminateCancel : .terminateNow
+        }
         let alert = NSAlert()
         alert.messageText = "A meeting is being recorded"
         alert.informativeText = "Save the meeting before quitting, or discard the recording?"
@@ -96,11 +106,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let meetingID = (userInfo[MeetingNotifications.meetingIDKey] as? String).flatMap(UUID.init(uuidString:))
         let event = MeetingNotifications.event(from: userInfo)
         let category = response.notification.request.content.categoryIdentifier
+        let occurrence = response.notification.request.identifier
         // For suggestions only the actions do something; clicking the notification body does nothing.
         Task { @MainActor in
             switch category {
             case MeetingNotifications.eventCategory:
-                if action == MeetingNotifications.startRecordingAction, let event { self.environment.startRecording(event: event) }
+                if action == MeetingNotifications.startRecordingAction, let event {
+                    self.environment.startRecording(event: event, occurrence: occurrence)
+                }
+            case MeetingNotifications.eventWhileRecordingCategory:
+                if action == MeetingNotifications.stopAndRecordNextAction, let event {
+                    self.environment.stopAndRecordNext(event: event, occurrence: occurrence)
+                }
             case MeetingNotifications.callStartCategory:
                 if action == MeetingNotifications.startRecordingAction { self.environment.startRecording() }
             case MeetingNotifications.callEndCategory:

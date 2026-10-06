@@ -96,6 +96,9 @@ stops before building when the signing identity is missing.
 3. During the meeting the menu shows the elapsed time and a level for each source.
 4. Choose **Stop & summarize** (or press the shortcut again). Minutes finishes the transcript, separates speakers,
    writes the title and summary, saves the note and shows a notification. **Discard** deletes everything instead.
+   Processing runs in the background: you can start the next recording right away, and the menu shows one row per
+   meeting still being processed (with **Retry** and **Discard** if it failed). Quitting while a meeting is still
+   processing asks **Wait** or **Quit anyway**; with **Quit anyway** the meeting is finished the next time Minutes opens.
 5. Open **All meetings…** to browse, search, read, re-summarize with another summary type and edit tags.
 6. To ask questions about your meetings, install the Minutes skill in your AI agent (Settings › Integrations) and
    ask the agent, for example "what did we agree with Hemisphere about the delivery date?".
@@ -114,7 +117,7 @@ removes lines that repeat the remote speech closely.
 - **Summaries:** provider preset (Ollama, DeepSeek, OpenAI, Custom), base URL, API key, model, test connection,
   summarize automatically, default summary type, the summary type editor, and the **glossary** of name corrections
   ("Doctor Grim" → "DrGreenlife") applied to every new transcript. Tagging uses this provider too. With DeepSeek,
-  summaries use its reasoning mode at medium effort (better summaries, a bit slower); titles and tags do not.
+  summaries use its reasoning mode at medium effort (better summaries, a bit slower) with no output limit; titles and tags do not.
 - **Tags:** detect clients automatically, add up to three topic tags automatically, **Your email addresses**, and
   re-tag all meetings. Enter the addresses you join meetings with (for example your work addresses for each
   company you work for). In each meeting, the address you joined with tells Minutes which organization you
@@ -129,8 +132,14 @@ removes lines that repeat the remote speech closely.
 
 With calendar events on, the event of a followed calendar that is in progress when you start recording (all-day
 events are ignored) gives the note its title, and the note stores the calendar name, the attendees and the call
-link. When an event with a call link or attendees starts, Minutes shows a notification with **Start recording** and
-**Dismiss**. It never records on its own, and it does not notify while you are already recording.
+link. One minute before an event with a call link or attendees starts, Minutes shows a notification
+("… starts in 1 minute") with **Start recording** and **Dismiss**; if it learns about the event later (the event was
+added late, Minutes was opened or the Mac woke up), it notifies right away, up to five minutes after the start. It never records on its own.
+If you are still recording another meeting, the notification offers **Stop & record next** instead: it stops and
+saves the current meeting (processed in the background) and starts recording the next one at once.
+Minutes asks macOS for the persistent notification style, so suggestions stay on screen until you close them. macOS
+applies it only on the first install; if Minutes notifications disappear after a few seconds, choose **Persistent**
+(**Alerts** before macOS 15) in System Settings › Notifications › Minutes.
 
 ### AI agent integrations
 
@@ -156,7 +165,7 @@ For a fully local setup, keep transcription on this Mac and use the Ollama prese
 ### Unscheduled calls
 
 When Zoom, Teams, Slack, Webex, FaceTime, Discord or a browser uses the microphone for 10 seconds and you are not
-recording, Minutes asks **Are you in a meeting?** with **Start recording**. While recording, when the call releases
+recording (an earlier meeting may still be processing), Minutes asks **Are you in a meeting?** with **Start recording**. While recording, when the call releases
 the microphone for 10 seconds, it asks **Did the meeting end?** with **Stop & summarize**. Minutes never starts or
 stops a recording by itself. Turn it off in Settings › General › "Suggest recording when a call is detected".
 
@@ -168,6 +177,13 @@ writes names correctly. When something is still wrong, open the meeting and choo
 then write what is wrong in your own words ("Doctor Grim is DrGreenlife; Pablo Veliz works at VNS") and choose
 Apply. Minutes fixes those names in the transcript, adds them to the glossary so they do not happen again, keeps
 your instructions with the meeting (they open pre-filled next time), and regenerates the summary and tags.
+
+Summaries and topic tags are written in the language most of the meeting is spoken in, as judged by the model. If a summary comes out in the
+wrong language, choose **Language** › English or Español next to Regenerate: Minutes keeps that choice for the
+meeting and regenerates the summary and tags in it. **Auto** returns to detection.
+
+To rename a meeting, click its title, type the new one and press Enter (Escape cancels). Minutes updates the title
+in the note and renames the file with the file name pattern.
 
 ### Updates
 
@@ -211,7 +227,7 @@ meeting_link: https://meet.google.com/abc-defg-hij
 ```
 
 You can edit the notes freely. Regenerating a summary only replaces the text between the summary markers. A hidden
-`.minutes/` folder holds one JSON sidecar per meeting (transcript segments, summary metadata, manual tags), the
+`.minutes/` folder holds one JSON sidecar per meeting (transcript segments, summary metadata, manual tags, chosen summary language), the
 audio when "Keep audio recording" is on, and `dictionary.md` for AI agents. The note stays complete without them.
 The `calendar`, `attendees` and `meeting_link` keys appear only when the recording matched a calendar event.
 

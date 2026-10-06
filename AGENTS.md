@@ -18,6 +18,9 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
 - App icon: `Resources/AppIcon.icns`, rendered by `swift Scripts/make-icon.swift` (waveform on a dark tile) and
   copied into the bundle by `build.sh`. Edit the script, never the `.icns` by hand.
 - UserNotifications only works inside the `.app` bundle; a bare `swift build` binary skips notifications.
+- `build.sh` sets `NSUserNotificationAlertStyle = alert` (persistent alerts). macOS uses it only as the default on the
+  first registration; the user's choice in System Settings › Notifications wins. The display time of banners cannot
+  be configured by an app.
 
 ## Source layout (`Sources/Minutes/`)
 
@@ -39,6 +42,12 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   the main actor. `RecordingSession` is an actor; one serial worker transcribes chunks in order. The main actor
   receives coarse events only (state, elapsed time once per second, levels at 10 Hz, processing step). Never add a
   global "sync everything" refresh: it is what made Muesli slow.
+- **Sessions:** at most one recording; `AppEnvironment.status` describes only that recording. Stopped meetings move
+  to `stopped` (stop order, name, processing step or `FinishResult`) and process in the background while a new
+  recording runs. Session events are routed by session id (levels and elapsed only from the current recording).
+  `RecordingSession.stopCapture()` must return before the next recording starts (one system audio tap at a time);
+  `process()` runs the finish. Retry and discard of stopped meetings take an id; recovery skips every live session
+  id. `isBusy` = recording or any stopped meeting still processing (updates, Quit).
 - `@unchecked Sendable` is allowed only where state is confined to a named queue, with a comment saying which
   (currently `SystemAudioTap`, `SampleMixer`, `MicRecorder`, `Int16Converter`). Do not use `nonisolated(unsafe)`.
 - **Storage:** the notes folder is the only durable store for finished meetings. No database. `NoteIndex` reads
@@ -81,8 +90,8 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   `minutes_id` are ignored.
 - **Summary updates** replace only the text between the markers (falling back to the `## Summary` heading when the
   markers were removed). All writes go to a temporary file and are moved into place.
-- **Sidecar:** `<notes folder>/.minutes/<id>.json` with segments (start, end, speaker), summary metadata and
-  `manualTags`. Kept audio: `.minutes/<id>.m4a`. A note must stay usable without its sidecar.
+- **Sidecar:** `<notes folder>/.minutes/<id>.json` with segments (start, end, speaker), summary metadata,
+  `manualTags` and `language` (`"en"`/`"es"`, absent for Auto). Kept audio: `.minutes/<id>.m4a`. A note must stay usable without its sidecar.
 - **Application Support** (`~/Library/Application Support/Minutes/`): `summary-types.json` (user overrides and
   custom types; built-ins live in code and "Reset to default" deletes the override) and
   `InProgress/<id>/` (`session.json` with start time, settings snapshot and the calendar `EventInfo`,
@@ -112,7 +121,8 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   transcript; a Swift guard replaces a model tag that shares no token with the domain label or title words with the
   domain-derived tag.
 - **Reasoning:** `ChatClient.complete(…, reasoning:)`; on api.deepseek.com `thinking` is enabled with `reasoning_effort: "medium"`
-  only for summaries (16,000 tokens, 300 s); titles, tags and the connection test keep it disabled.
+  only for summaries (no `max_tokens`: `maxTokens: nil` omits it, 300 s); titles, tags and the connection test keep it
+  disabled and keep their limits.
 - **Corrections:** `Glossary` (`~/Library/Application Support/Minutes/glossary.json`, `[{from, to}]`) is applied
   whole-word and case-insensitively to new transcripts before the first write, and listed in the notes dictionary.
   `CorrectionService` asks the model for `{"replacements": [...]}` from the user's instructions and the transcript's
@@ -120,11 +130,23 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   the transcript section and sidecar segments. The sheet applies in one step (no preview). Instructions are stored
   in the sidecar `instructions`, are not displayed in the detail, pre-fill the sheet, and are sent on every
   regenerate and re-tag.
+- **Language:** Minutes never detects the language (an on-device `NLLanguageRecognizer` guess read a Spanish
+  transcript as Polish). `MeetingContext.language` is the sidecar `language` (`MeetingLanguage`, English or Spanish)
+  or nil for Auto, where summaries, titles and topic tags ask the model for "the language most of the transcript is
+  spoken in, even though these instructions are in English". The instruction is placed before and after the
+  transcript (models drift to English otherwise). The detail's Language menu (Auto, English, Español) stores the
+  choice first, then regenerates with the current type and, only if that succeeds, re-tags.
+- **Title edits:** `NoteWriter.updateTitle` replaces the `title` front matter value and the first `# ` heading (never
+  adds one), writes atomically, then renames the file with `fileNamePattern` (the note itself is not a collision;
+  unchanged name skips the move). A failed move keeps the new title and shows the error. Sidecar and audio are keyed
+  by id, so they are not renamed.
 - **Call detection:** `Capture/CallDetector` polls Core Audio process objects every 2 s (only while
   `suggestOnCallDetected` is on): `kAudioHardwarePropertyProcessObjectList`, then each process's input-running flag,
   PID and bundle ID; Minutes' own PID and processes without a bundle ID are skipped; meeting apps are one constant
-  bundle-ID list matched by case-insensitive prefix. `callStarted` after 10 s of continuous input (once per use);
-  `callEnded` during a recording after a meeting app used input and none has for 10 s (once per recording, re-armed).
+  bundle-ID list matched by case-insensitive prefix. `callStarted` after 10 s of continuous input (once per use),
+  suggested whenever nothing records (background processing does not suppress it);
+  `callEnded` during a recording after a meeting app used input and none has for 10 s (once per recording, re-armed
+  explicitly on every new recording).
   `AppEnvironment` posts the "call-start" / "call-end" notifications; nothing starts or stops automatically.
   Calendar suggestions are not deduplicated against call suggestions. Safari captures in a WebKit process
   (`com.apple.WebKit.*`), which is not in the list.
@@ -133,9 +155,13 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
 - **Calendar preferences:** `useCalendar` (off by default), `suggestRecording` (on by default) and
   `unfollowedCalendars` (calendar identifiers; storing the unfollowed set keeps new calendars followed). The event
   is the one in progress at start in a followed calendar, ignoring all-day events, with the most overlap.
-  Suggestions fire at the start of events with a meeting link or at least one attendee, once per occurrence (in
-  memory), never while recording, with a five-minute catch-up after wake. "Start recording" passes the notified
-  `EventInfo` to the session; the notification body does nothing.
+  Suggestions fire one minute (`leadTime`) before the start of events with a meeting link or at least one attendee, once per occurrence (in
+  memory), also while recording; every re-plan (launch, calendar or preference change, wake) first posts events whose
+  suggestion moment passed and that started less than five minutes ago. The category is chosen at post time:
+  "event-starting" ("Start recording") when idle, "event-starting-recording" ("Stop & record next") while recording.
+  Both pass the notified `EventInfo`; "Stop & record next" stops capture of the current recording, then starts the
+  next (only starts when nothing records; no-op when the current recording is that occurrence). The notification
+  body does nothing.
 - **Agent skill:** `<skills folder>/minutes/SKILL.md` for Claude Code `~/.claude/skills`, Codex `~/.agents/skills`,
   GitHub Copilot `~/.copilot/skills`, Gemini CLI `~/.gemini/skills`, OpenCode `~/.config/opencode/skills`; an agent
   is detected when its configuration folder exists. Ownership marker: `<!-- generated-by: minutes -->`. Never

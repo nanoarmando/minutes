@@ -53,10 +53,11 @@ final class CallDetector: @unchecked Sendable {
         }
     }
 
-    /// Arms the "did the meeting end?" question for a new recording.
+    /// Arms the "did the meeting end?" question for every new recording, also one that starts right after another
+    /// without an observed stop.
     func setRecording(_ recording: Bool) {
         queue.async { [self] in
-            guard recording != isRecording else { return }
+            guard recording || isRecording else { return }
             isRecording = recording
             callSeenWhileRecording = false
             endAsked = false

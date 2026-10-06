@@ -86,7 +86,7 @@ actor RecordingSession {
             try mic.start()
             self.mic = mic
         } catch {
-            await stopCapture()
+            await tearDownCapture()
             store.delete()
             self.store = nil
             throw error
@@ -108,9 +108,22 @@ actor RecordingSession {
 
     /// Stops capture, finishes the transcript and saves the note. Returns when the note is saved or kept.
     func stop() async {
-        guard isCapturing, let store else { return }
+        if await stopCapture() { await process() }
+    }
+
+    /// Returns once the system tap, the microphone and the writers are down, so another session can start
+    /// capturing. False when this session was not capturing.
+    @discardableResult
+    func stopCapture() async -> Bool {
+        guard isCapturing, store != nil else { return false }
         eventSink.yield(.state(.processing(.transcribing)))
-        await stopCapture()
+        await tearDownCapture()
+        return true
+    }
+
+    /// Finishes the transcript and saves the note after `stopCapture()`.
+    func process() async {
+        guard !isCapturing, let store else { return }
         await transcriptionWorker?.value
         await finish(store)
     }
@@ -123,7 +136,7 @@ actor RecordingSession {
 
     /// Stops capture and deletes all audio and partial transcript without creating a note.
     func discard() async {
-        await stopCapture()
+        await tearDownCapture()
         transcriptionWorker?.cancel()
         await transcriptionWorker?.value
         store?.delete()
@@ -143,7 +156,7 @@ actor RecordingSession {
         eventSink.finish()
     }
 
-    private func stopCapture() async {
+    private func tearDownCapture() async {
         isCapturing = false
         ticker?.cancel()
         systemTap?.stop()

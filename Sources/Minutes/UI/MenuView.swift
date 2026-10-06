@@ -1,17 +1,14 @@
 import KeyboardShortcuts
 import SwiftUI
 
-/// The menu bar menu: idle, recording, processing and finished states.
+/// The menu bar menu: idle or recording controls, then one row per stopped meeting.
 struct MenuView: View {
     let environment: AppEnvironment
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            switch environment.status {
-            case .recording: recording
-            case .processing(let step): processing(step)
-            default: idle
-            }
+            if environment.isRecording { recording } else { idle }
+            ForEach(environment.stopped) { stoppedRow($0) }
             MenuDivider()
             if !environment.isRecording {
                 if let version = environment.updates.availableVersion, !environment.isBusy {
@@ -35,7 +32,11 @@ struct MenuView: View {
     // MARK: - States
 
     @ViewBuilder private var idle: some View {
-        finishedMessage
+        if case .startFailed(let message) = environment.status {
+            Message(icon: "exclamationmark.triangle.fill", tint: .orange, text: message) {
+                MenuButton("Open Settings") { environment.showSettings(.general) }
+            }
+        }
         modelStatus
         Text(engineDescription).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 3)
         MenuRow("Start recording", detail: KeyboardShortcuts.getShortcut(for: .toggleRecording)?.description ?? "") {
@@ -64,29 +65,14 @@ struct MenuView: View {
         }
     }
 
-    private func processing(_ current: ProcessingStep) -> some View {
-        let steps: [ProcessingStep] = [.transcribing, .separatingSpeakers, .summarizing, .saving]
-        let currentIndex = steps.firstIndex(of: current) ?? 0
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("Processing meeting").font(.headline)
-            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                HStack(spacing: 6) {
-                    if index < currentIndex {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    } else if index == currentIndex {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "circle").foregroundStyle(.tertiary)
-                    }
-                    Text(step.rawValue).foregroundStyle(index > currentIndex ? .secondary : .primary)
-                }
+    @ViewBuilder private func stoppedRow(_ meeting: AppEnvironment.StoppedMeeting) -> some View {
+        switch meeting.phase {
+        case .processing(let step):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("\(meeting.name) — \(step.rawValue)").lineLimit(1)
             }
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-    }
-
-    @ViewBuilder private var finishedMessage: some View {
-        switch environment.status {
+            .padding(.horizontal, 10).padding(.vertical, 6)
         case .finished(.saved(let note)):
             Message(icon: "checkmark.circle.fill", tint: .green, text: "Saved “\(note.title)”"
                 + (note.summaryFailed ? ". The summary failed." : "")
@@ -98,18 +84,14 @@ struct MenuView: View {
                 MenuButton("Choose folder…") { environment.showSettings(.general) }
             }
         case .finished(.failed(let message)):
-            Message(icon: "exclamationmark.triangle.fill", tint: .orange, text: message) {
-                MenuButton("Retry") { environment.retryProcessing() }
+            Message(icon: "exclamationmark.triangle.fill", tint: .orange, text: "\(meeting.name): \(message)") {
+                MenuButton("Retry") { environment.retryProcessing(id: meeting.id) }
                 MenuButton("Discard") {
-                    if confirm("Discard this recording?", "The audio and transcript are deleted.", action: "Discard") { environment.discardRecording() }
+                    if confirm("Discard this recording?", "The audio and transcript are deleted.", action: "Discard") {
+                        environment.discardStopped(id: meeting.id)
+                    }
                 }
             }
-        case .startFailed(let message):
-            Message(icon: "exclamationmark.triangle.fill", tint: .orange, text: message) {
-                MenuButton("Open Settings") { environment.showSettings(.general) }
-            }
-        default:
-            EmptyView()
         }
     }
 
