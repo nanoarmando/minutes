@@ -30,7 +30,9 @@ applies.
 ### Requirement: Summary types
 Minutes SHALL provide the built-in summary types General, Client call, Standup and 1:1, each with editable
 instructions and a "Reset to default" action. The user SHALL be able to add, edit and delete custom summary types
-and choose the default type. Summaries SHALL be written in the language of the meeting.
+and choose the default type. Summaries SHALL be written in the meeting's chosen language when the user set one
+(English or Spanish), and otherwise in the language most of the transcript is spoken in, as judged by the model
+from the whole transcript, including the section headings. Minutes SHALL NOT detect the language itself.
 
 #### Scenario: Custom type
 - **WHEN** the user adds a summary type named "Sales call" with their own instructions
@@ -39,6 +41,14 @@ and choose the default type. Summaries SHALL be written in the language of the m
 #### Scenario: Default type deleted
 - **WHEN** the user deletes the custom type that is set as default
 - **THEN** the default returns to General
+
+#### Scenario: Spanish meeting in Auto
+- **WHEN** a meeting held in Spanish is summarized and no language was chosen for it
+- **THEN** the summary and its section headings are in Spanish
+
+#### Scenario: Chosen language wins
+- **WHEN** the user chose English for a meeting whose transcript is mostly Spanish and regenerates its summary
+- **THEN** the summary is written in English
 
 ### Requirement: Automatic summary
 When "Summarize automatically" is on (default) and a provider is configured, Minutes SHALL summarize each meeting
@@ -91,10 +101,33 @@ Decisions, Action items, and Risks and open questions; empty sections SHALL say 
 - **THEN** Action items lists that person, the proposal, and Friday
 
 ### Requirement: Reasoning for summaries
-When the provider offers a reasoning mode, summaries SHALL use it at medium effort, with a token budget large enough
-for the reasoning and the answer; titles, tags, corrections and the connection test SHALL NOT use it.
+When the provider offers a reasoning mode, summaries SHALL use it at medium effort. Summary requests SHALL NOT set an
+output token limit, so the provider's own maximum applies to the reasoning and the answer; titles, tags,
+corrections and the connection test SHALL NOT use reasoning and SHALL keep their own limits.
 
 #### Scenario: DeepSeek summary
 - **WHEN** the summary provider is DeepSeek and a meeting is summarized
 - **THEN** the request enables thinking at medium effort, while the title and tagging requests for the same meeting do not
+
+#### Scenario: Long reasoning
+- **WHEN** the model reasons for more than 16,000 tokens before writing the summary
+- **THEN** the summary is still written, because the request sets no output token limit
+
+### Requirement: Summary language per meeting
+Each meeting SHALL have a summary language of Auto (default), English or Español. Auto SHALL ask the model to
+write in the language most of the transcript is spoken in, even though the instructions are in English. A chosen
+language SHALL be stored with the meeting and used by every later summary regeneration, correction and re-tag of
+that meeting until the user sets it back to Auto. New meetings SHALL start as Auto.
+
+#### Scenario: Choice is kept
+- **WHEN** the user chose Español for a meeting and later regenerates it with another summary type
+- **THEN** the new summary is in Spanish
+
+#### Scenario: Back to Auto
+- **WHEN** the user sets a meeting back to Auto
+- **THEN** the stored choice is removed and the summary is regenerated in the language the model finds in the transcript
+
+#### Scenario: Sidecar deleted
+- **WHEN** the sidecar of a meeting with a chosen language is deleted
+- **THEN** the meeting behaves as Auto
 
