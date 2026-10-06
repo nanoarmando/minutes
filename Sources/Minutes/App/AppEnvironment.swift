@@ -70,7 +70,10 @@ final class AppEnvironment {
             MainActor.assumeIsolated { self?.stopRecording() }
         }
         MeetingNotifications.requestAuthorization()
-        Task { await finishInterruptedMeetings() }
+        Task {
+            await finishInterruptedMeetings()
+            await tagPendingNotes()
+        }
     }
 
     var isRecording: Bool {
@@ -101,7 +104,7 @@ final class AppEnvironment {
     private var tagService: TagService {
         TagService(
             existingTags: existingTags, detectClients: preferences.detectClients,
-            topicTags: preferences.topicTags, service: summaryService
+            topicTags: preferences.topicTags, userEmails: preferences.userEmails, service: summaryService
         )
     }
 
@@ -270,34 +273,58 @@ final class AppEnvironment {
     }
 
     /// Announces a saved note and runs model tagging, which never delays saving.
-    private func didSave(_ note: SavedNote) {
+    private func didSave(_ note: SavedNote, tagNow: Bool = true) {
         noteIndex.rescan()
         MeetingNotifications.postSaved(note)
-        guard summaryService != nil else { return }
-        let tagService = tagService
-        Task {
-            try? await tagService.retag(note: note.url, id: note.id)
-            noteIndex.rescan()
-        }
+        guard tagNow, summaryService != nil else { return }
+        Task { await tag(url: note.url, id: note.id) }
     }
 
     // MARK: - Tags
 
-    func retag(_ note: NoteSummary) async throws {
-        try await tagService.retag(note: note.url, id: note.id)
+    /// Re-tags one meeting; returns the error message when the tagging call failed.
+    @discardableResult
+    func retag(_ note: NoteSummary) async -> String? {
+        await tag(url: note.url, id: note.id)
+    }
+
+    /// The one tagging path (after save, at launch, Re-tag, Re-tag all). The sidecar keeps the note pending, with
+    /// the error, until an attempt succeeds, so a failure or a quit is retried at the next launch.
+    @discardableResult
+    private func tag(url: URL, id: UUID) async -> String? {
+        let writer = NoteWriter(folder: url.deletingLastPathComponent())
+        var failure: String?
+        do {
+            try await tagService.retag(note: url, id: id)
+        } catch {
+            failure = error.localizedDescription
+        }
+        try? writer.setTaggingState(TaggingState(pending: failure != nil, lastError: failure), id: id)
         noteIndex.rescan()
+        return failure
+    }
+
+    /// Tags, once and one at a time, the notes left pending by a failure or a quit.
+    private func tagPendingNotes() async {
+        await noteIndex.waitForScan()
+        guard summaryService != nil else { return }
+        for note in noteIndex.notes {
+            let writer = NoteWriter(folder: note.url.deletingLastPathComponent())
+            if writer.readSidecar(id: note.id)?.tagging?.pending == true {
+                await tag(url: note.url, id: note.id)
+            }
+        }
     }
 
     /// Re-tags every meeting one after another; `stopRetagging()` ends it after the current meeting.
     func retagAll() {
         guard retagProgress == nil else { return }
         let notes = noteIndex.notes
-        let tagService = tagService
         retagProgress = (0, notes.count)
         retagTask = Task {
             for (index, note) in notes.enumerated() {
                 guard !Task.isCancelled else { break }
-                try? await tagService.retag(note: note.url, id: note.id)
+                await tag(url: note.url, id: note.id)
                 retagProgress = (index + 1, notes.count)
             }
             retagProgress = nil
@@ -335,7 +362,7 @@ final class AppEnvironment {
             let result = await processor.finish(store: store, recovered: store.finishedMeeting() == nil, notesFolder: folder) { _ in }
             switch result {
             case .waitingForFolder: waiting += 1
-            case .saved(let note): didSave(note)
+            case .saved(let note): didSave(note, tagNow: false)  // tagPendingNotes() tags it next
             case .failed: break
             }
         }

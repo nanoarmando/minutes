@@ -113,9 +113,14 @@ removes lines that repeat the remote speech closely.
 - **Transcription:** on this Mac (Parakeet v3) or an OpenAI-compatible API; model status; speaker separation.
 - **Summaries:** provider preset (Ollama, DeepSeek, OpenAI, Custom), base URL, API key, model, test connection,
   summarize automatically, default summary type and the summary type editor. Tagging uses this provider too.
-- **Tags:** detect clients automatically (up to two external companies per meeting, as `client/<name>`), add up to
-  three topic tags automatically, re-tag all meetings. The model reuses existing tags, so "Hemisphere" and "HB"
-  stay `client/hemisphere-brands`. Tags you add by hand are kept when re-tagging.
+- **Tags:** detect clients automatically, add up to three topic tags automatically, **Your email addresses**, and
+  re-tag all meetings. Enter the addresses you join meetings with (for example your work addresses for each
+  company you work for). In each meeting, the address you joined with tells Minutes which organization you
+  represent; every other business email domain among the attendees becomes a client (`drgreenlife.com` →
+  `client/drgreenlife`, up to two per meeting). Personal domains such as Gmail never do. Without a calendar event,
+  the model finds clients in the title and the conversation. Existing client tags are reused, and tags you add by
+  hand are kept when re-tagging. If tagging fails or Minutes quits before it finishes, it is retried the next time
+  Minutes opens, and the meeting shows the error with a Re-tag button.
 - **Integrations:** install, update or remove the Minutes skill for each detected AI agent.
 
 ### Calendar

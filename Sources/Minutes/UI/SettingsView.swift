@@ -301,12 +301,22 @@ private struct SummaryTypeEditor: View {
 private struct TagsSettings: View {
     let environment: AppEnvironment
     @State private var confirmsRetag = false
+    /// Edited as typed and saved parsed, so the field is not rewritten while typing.
+    @State private var userEmails = Preferences.load().userEmails.joined(separator: ", ")
 
     var body: some View {
         Form {
             Section {
                 Toggle("Detect clients automatically", isOn: environment.binding(\.detectClients))
                 Toggle("Add topic tags automatically", isOn: environment.binding(\.topicTags))
+                TextField("Your email addresses", text: $userEmails, prompt: Text("you@company.com, you@other.com"), axis: .vertical)
+                    .onChange(of: userEmails) { _, text in
+                        let emails = text.components(separatedBy: CharacterSet(charactersIn: ",\n"))
+                            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
+                        environment.updatePreferences { $0.userEmails = emails }
+                    }
+                Text("The addresses you join meetings with. Minutes uses them to tell your organization from your clients.")
+                    .font(.caption).foregroundStyle(.secondary)
                 if let progress = environment.retagProgress {
                     HStack {
                         ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))

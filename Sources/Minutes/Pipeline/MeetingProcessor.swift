@@ -138,7 +138,8 @@ struct MeetingProcessor: Sendable {
         let writer = NoteWriter(folder: folder, fileNamePattern: preferences.fileNamePattern)
         let tracks = preferences.keepAudio ? [store.micTrack, store.systemTrack].filter { FileManager.default.fileExists(atPath: $0.path) } : []
         do {
-            let url = try writer.save(meeting, audioTracks: tracks)
+            let taggingPending = SummaryService(endpoint: preferences.summaryEndpoint(keychain: keychain)) != nil
+            let url = try writer.save(meeting, audioTracks: tracks, taggingPending: taggingPending)
             store.delete()
             return .saved(SavedNote(url: url, id: meeting.id, title: meeting.title, systemAudioSilent: meeting.systemAudioSilent, summaryFailed: meeting.summary.error != nil))
         } catch {

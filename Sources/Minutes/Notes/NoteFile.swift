@@ -182,8 +182,15 @@ enum NoteFile {
         ISO8601DateFormatter().date(from: text)
     }
 
+    /// JSON string escaping is valid YAML; slashes stay unescaped so tags read `client/acme`, not `client\/acme`.
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        return encoder
+    }()
+
     private static func quoted(_ text: String) -> String {
-        String(decoding: (try? JSONEncoder().encode(text)) ?? Data("\"\"".utf8), as: UTF8.self)
+        String(decoding: (try? encoder.encode(text)) ?? Data("\"\"".utf8), as: UTF8.self)
     }
 
     private static func flowList(_ items: [String]) -> String {

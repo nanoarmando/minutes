@@ -23,6 +23,8 @@ struct Preferences: Codable, Sendable, Equatable {
     var autoSummarize = true
     var detectClients = true
     var topicTags = true
+    /// The addresses the user joins meetings with, lowercased; they tell the user's organization from clients.
+    var userEmails: [String] = []
 
     private static let key = "preferences"
 

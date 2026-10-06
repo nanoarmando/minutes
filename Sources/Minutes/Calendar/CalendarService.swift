@@ -6,8 +6,33 @@ import Observation
 struct EventInfo: Codable, Sendable, Equatable {
     var title: String
     var calendar: String
+    /// Display names (or emails) of the other attendees, as written in front matter.
     var attendees: [String]
     var meetingLink: String?
+    /// Email addresses of the other attendees, for client detection (sidecar only).
+    var attendeeEmails: [String] = []
+    /// The domain of the address the user joined with, when known.
+    var ownDomain: String?
+
+    init(title: String, calendar: String, attendees: [String], meetingLink: String?, attendeeEmails: [String] = [], ownDomain: String? = nil) {
+        self.title = title
+        self.calendar = calendar
+        self.attendees = attendees
+        self.meetingLink = meetingLink
+        self.attendeeEmails = attendeeEmails
+        self.ownDomain = ownDomain
+    }
+
+    /// Session files written before `attendeeEmails` existed still decode.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        calendar = try container.decode(String.self, forKey: .calendar)
+        attendees = try container.decode([String].self, forKey: .attendees)
+        meetingLink = try container.decodeIfPresent(String.self, forKey: .meetingLink)
+        attendeeEmails = try container.decodeIfPresent([String].self, forKey: .attendeeEmails) ?? []
+        ownDomain = try container.decodeIfPresent(String.self, forKey: .ownDomain)
+    }
 }
 
 /// Calendar access, followed calendars, the event lookup at recording start and start suggestions (design D9).
@@ -66,7 +91,7 @@ final class CalendarService {
         return events(from: start.addingTimeInterval(-24 * 3600), to: windowEnd)
             .filter { $0.startDate <= start && $0.endDate > start }
             .max { overlap($0) < overlap($1) }
-            .map(Self.info)
+            .map(info)
     }
 
     // MARK: - Calendars and planning
@@ -110,7 +135,7 @@ final class CalendarService {
         where event.startDate >= since && event.startDate <= now && Self.qualifies(event) {
             let occurrence = "\(event.eventIdentifier ?? "")@\(event.startDate.timeIntervalSince1970)"
             guard notified.insert(occurrence).inserted else { continue }
-            MeetingNotifications.postEventStarting(Self.info(event), occurrence: occurrence)
+            MeetingNotifications.postEventStarting(info(event), occurrence: occurrence)
         }
     }
 
@@ -120,17 +145,39 @@ final class CalendarService {
         meetingLink(of: event) != nil || !attendees(of: event).isEmpty
     }
 
-    private static func info(_ event: EKEvent) -> EventInfo {
-        EventInfo(title: event.title ?? "", calendar: event.calendar.title, attendees: attendees(of: event), meetingLink: meetingLink(of: event))
+    /// The user's address is the attendee matching "Your email addresses", else the participant the calendar marks
+    /// as the user, else the calendar account when it is an email address. Attendees that are the user are left out.
+    private func info(_ event: EKEvent) -> EventInfo {
+        let userEmails = Set(preferences.userEmails)
+        let participants = event.attendees ?? []
+        let isUser = { (participant: EKParticipant) in participant.isCurrentUser || userEmails.contains(Self.email(of: participant) ?? "") }
+        let others = participants.filter { !isUser($0) }
+        let userAddress = participants.compactMap(Self.email).first(where: userEmails.contains)
+            ?? participants.first(where: \.isCurrentUser).flatMap(Self.email)
+            ?? Self.emailAccount(event.calendar.source.title)
+        return EventInfo(
+            title: event.title ?? "", calendar: event.calendar.title,
+            attendees: others.compactMap(Self.displayName), meetingLink: Self.meetingLink(of: event),
+            attendeeEmails: others.compactMap(Self.email), ownDomain: userAddress.flatMap(ClientDomains.domain)
+        )
     }
 
-    /// Display names, or the email when there is none, excluding the user.
+    private static func emailAccount(_ title: String) -> String? {
+        title.contains("@") ? title.lowercased() : nil
+    }
+
+    private static func email(of participant: EKParticipant) -> String? {
+        let address = participant.url.absoluteString.replacingOccurrences(of: "mailto:", with: "").lowercased()
+        return address.contains("@") ? address : nil
+    }
+
+    private static func displayName(of participant: EKParticipant) -> String? {
+        if let name = participant.name, !name.isEmpty { return name }
+        return email(of: participant)
+    }
+
     private static func attendees(of event: EKEvent) -> [String] {
-        (event.attendees ?? []).filter { !$0.isCurrentUser }.compactMap { participant in
-            if let name = participant.name, !name.isEmpty { return name }
-            let address = participant.url.absoluteString.replacingOccurrences(of: "mailto:", with: "")
-            return address.isEmpty ? nil : address
-        }
+        (event.attendees ?? []).filter { !$0.isCurrentUser }.compactMap(displayName)
     }
 
     /// The event URL, else the first Zoom, Meet, Teams or Webex link in the location or notes.

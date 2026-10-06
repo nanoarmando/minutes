@@ -49,6 +49,11 @@ final class NoteIndex {
     }
 
     /// Rescans after a short quiet period, so a burst of file events triggers one scan.
+    /// Returns once the scan in progress (the first one, at launch) has finished.
+    func waitForScan() async {
+        await pendingRescan?.value
+    }
+
     func rescan(after delay: Duration = .zero) {
         if watcher == nil { watch() }  // the folder may have been created since
         pendingRescan?.cancel()

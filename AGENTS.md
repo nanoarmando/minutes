@@ -92,12 +92,20 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
 - **Keychain:** service `com.minutes.app`, one generic-password item per endpoint kind.
 - **Speakers:** microphone = `You`; remote = `Speaker N` numbered by first appearance in the transcript, or
   `Others` when separation is off or fails. Same-speaker lines less than 2 s apart are merged.
-- **Tags:** there is no client list. `TagService` makes one model call after save returning
-  `{"clients": [...], "topics": [...]}`, given the transcript (excerpts beyond 48,000 characters) and the existing
-  client and topic tags so the model reuses them. Minutes slugs names, prefixes clients with `client/`, keeps at
-  most 2 clients and 3 topics, and drops topics starting with `client`. Preferences `detectClients` and `topicTags`
-  (on by default) drop their part of the request; both off means no call. Re-tagging replaces automatic tags and
-  keeps the sidecar's `manualTags`.
+- **Tags:** there is no client list. Client domains are decided in Swift (`ClientDomains`): the user's address
+  is the attendee matching the `userEmails` preference, else the `isCurrentUser` participant, else the calendar
+  account email; its domain is the user's organization (unknown → all `userEmails` domains). Every other attendee
+  domain that is not personal (fixed list) is a client, matched by its last two labels, ordered by attendee count,
+  at most 2. `TagService` makes one model call with a header (title, client domains, user's organization) before
+  the transcript; the model only names client domains (reusing existing tags) or, with no client domains, finds
+  clients in the title and transcript. Swift drops the user's organization, keeps at most 2 clients and 3 topics,
+  and falls back to domain-derived tags (`drgreenlife.com` → `client/drgreenlife`) when the model fails.
+  Re-tagging replaces automatic tags and keeps the sidecar's `manualTags`.
+- **Tagging reliability:** the sidecar's `tagging { pending, lastError }` is set to pending at save time; one path
+  serves after-save, Re-tag and Re-tag all; success clears it, failure keeps it and stores the error (never
+  swallowed). Pending notes are retried once at launch after the first index scan. The meeting detail shows
+  "Tagging failed" with Re-tag when `lastError` is set. The sidecar also stores `event` (`EventInfo` with
+  `attendeeEmails` and `ownDomain`) for later re-tags.
 - **Calendar preferences:** `useCalendar` (off by default), `suggestRecording` (on by default) and
   `unfollowedCalendars` (calendar identifiers; storing the unfollowed set keeps new calendars followed). The event
   is the one in progress at start in a followed calendar, ignoring all-day events, with the most overlap.

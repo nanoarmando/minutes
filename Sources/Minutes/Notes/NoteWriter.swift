@@ -21,7 +21,8 @@ struct NoteWriter: Sendable {
 
     /// Writes the note and its sidecar and returns the note's URL. `audioTracks` (16 kHz WAVs) are mixed into one
     /// m4a next to the sidecar when given.
-    func save(_ meeting: Meeting, audioTracks: [URL] = []) throws -> URL {
+    /// `taggingPending` marks the note for automatic tagging, so it is retried at launch until an attempt succeeds.
+    func save(_ meeting: Meeting, audioTracks: [URL] = [], taggingPending: Bool = false) throws -> URL {
         try ensureFolder()
         try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: true)
 
@@ -32,7 +33,10 @@ struct NoteWriter: Sendable {
             audioPath = ".minutes/\(name)"
         }
         let record = Sidecar.SummaryRecord(typeID: meeting.summary.typeID, model: meeting.summary.model, date: meeting.summary.date, error: meeting.summary.error)
-        try writeSidecar(Sidecar(id: meeting.id, segments: meeting.lines, summaries: [record]))
+        try writeSidecar(Sidecar(
+            id: meeting.id, segments: meeting.lines, summaries: [record], event: meeting.event,
+            tagging: taggingPending ? TaggingState(pending: true) : nil
+        ))
 
         let url = availableURL(for: meeting)
         try Data(NoteFile.render(meeting, audioPath: audioPath).utf8).write(to: url, options: .atomic)
@@ -60,6 +64,14 @@ struct NoteWriter: Sendable {
         try Data(NoteFile.settingTags(tags, in: document).utf8).write(to: noteURL, options: .atomic)
         var sidecar = readSidecar(id: id) ?? Sidecar(id: id, segments: [], summaries: [])
         sidecar.manualTags = manual
+        try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: true)
+        try writeSidecar(sidecar)
+    }
+
+    /// Records the outcome of a tagging attempt in the sidecar.
+    func setTaggingState(_ state: TaggingState, id: UUID) throws {
+        var sidecar = readSidecar(id: id) ?? Sidecar(id: id, segments: [], summaries: [])
+        sidecar.tagging = state
         try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: true)
         try writeSidecar(sidecar)
     }

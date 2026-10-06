@@ -10,6 +10,8 @@ struct MeetingDetailView: View {
     @State private var isAddingTag = false
     @State private var newTag = ""
     @State private var tagError: String?
+    /// The last automatic tagging error recorded in the sidecar.
+    @State private var taggingFailure: String?
     @State private var isRetagging = false
 
     private static let readingWidth: CGFloat = 720
@@ -38,7 +40,10 @@ struct MeetingDetailView: View {
             .padding([.horizontal, .bottom], 28)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task(id: "\(note.modified)-\(model.revision)") { content = await environment.noteIndex.content(of: note) }
+        .task(id: "\(note.modified)-\(model.revision)") {
+            content = await environment.noteIndex.content(of: note)
+            taggingFailure = NoteWriter(folder: note.url.deletingLastPathComponent()).readSidecar(id: note.id)?.tagging?.lastError
+        }
     }
 
     // MARK: - Header
@@ -109,6 +114,12 @@ struct MeetingDetailView: View {
                     .disabled(isRetagging)
             }
             if let tagError { Text(tagError).font(.caption).foregroundStyle(.red) }
+            if let taggingFailure, !isRetagging {
+                HStack {
+                    Label("Tagging failed: \(taggingFailure)", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                    Button("Re-tag") { retag() }
+                }
+            }
         }
     }
 
@@ -146,7 +157,7 @@ struct MeetingDetailView: View {
     private func retag() {
         isRetagging = true
         Task {
-            do { try await environment.retag(note) } catch { tagError = error.localizedDescription }
+            taggingFailure = await environment.retag(note)
             isRetagging = false
         }
     }

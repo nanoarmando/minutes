@@ -53,4 +53,13 @@ struct Sidecar: Codable, Sendable {
     var summaries: [SummaryRecord]
     /// Tags the user added by hand; re-tagging keeps them.
     var manualTags: [String]? = nil
+    /// The calendar event, kept for client detection when re-tagging.
+    var event: EventInfo? = nil
+    var tagging: TaggingState? = nil
+}
+
+/// Whether automatic tagging still has to run for a note (pending until an attempt succeeds) and why it last failed.
+struct TaggingState: Codable, Sendable, Equatable {
+    var pending: Bool
+    var lastError: String?
 }
