@@ -1,0 +1,13 @@
+schema: spec-driven
+
+context: |
+  Minutes is a small native macOS menu-bar app that records meetings (microphone + system audio),
+  transcribes them and writes the notes as Markdown files the user owns. It is a Granola-style
+  notetaker built new, not a fork. Parts of the meeting pipeline are adapted from Muesli
+  (https://github.com/Muesli-HQ/muesli, MIT) with credit.
+  Tech stack: Swift 6 language mode, SwiftUI + AppKit, minimum macOS 14.2, Apple silicon,
+  FluidAudio (Parakeet v3 ASR, Silero VAD, speaker diarization). Optional hosted transcription and
+  summaries through any OpenAI-compatible HTTP endpoint (OpenAI, DeepSeek, Ollama, Groq...).
+  Posture: as simple as possible. One menu bar icon, a Meetings window, Settings and About.
+  No telemetry, no self-update, no database: the notes folder is the source of truth.
+  Personal project, public repository, AGPL-3.0 license. Built and signed locally.
