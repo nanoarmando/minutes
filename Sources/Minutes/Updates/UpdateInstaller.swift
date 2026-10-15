@@ -28,6 +28,7 @@ enum UpdateInstaller {
     /// ~/Library/Caches/Minutes/updates
     static let workspace = URL.cachesDirectory.appendingPathComponent("Minutes/updates", isDirectory: true)
 
+    private static let diskutil = URL(fileURLWithPath: "/usr/sbin/diskutil")
     private static let hdiutil = URL(fileURLWithPath: "/usr/bin/hdiutil")
     private static let ditto = URL(fileURLWithPath: "/usr/bin/ditto")
 
@@ -117,16 +118,21 @@ enum UpdateInstaller {
     private static func attach(_ diskImage: URL) async throws -> URL {
         let mounts = workspace.appendingPathComponent("mounts", isDirectory: true)
         try FileManager.default.createDirectory(at: mounts, withIntermediateDirectories: true)
-        let result = await run(hdiutil, ["attach", "-nobrowse", "-readonly", "-noautoopen", "-mountrandom", mounts.path, "-plist", diskImage.path])
+        // Newer macOS deprecates `hdiutil attach` and can report valid images as corrupt; `diskutil image`
+        // replaces it but may not exist on older systems, so fall back to hdiutil.
+        var result = await run(diskutil, ["image", "attach", "--plist", "--readOnly", "--nobrowse", diskImage.path])
+        if !result.succeeded {
+            result = await run(hdiutil, ["attach", "-nobrowse", "-readonly", "-noautoopen", "-mountrandom", mounts.path, "-plist", diskImage.path])
+        }
         guard result.succeeded else { throw UpdateInstallerError.mountFailed(result.output) }
         guard let mountPoint = mountPoint(fromPlist: result.output) else {
-            throw UpdateInstallerError.mountFailed("hdiutil reported no mount point.")
+            throw UpdateInstallerError.mountFailed("The disk image reported no mount point.")
         }
         return URL(fileURLWithPath: mountPoint, isDirectory: true)
     }
 
     private static func mountPoint(fromPlist output: String) -> String? {
-        // hdiutil may print notices before the plist, so parse from its opening tag.
+        // diskutil and hdiutil may print notices before the plist, so parse from its opening tag.
         guard let start = output.range(of: "<?xml"),
               let plist = try? PropertyListSerialization.propertyList(from: Data(output[start.lowerBound...].utf8), format: nil) as? [String: Any],
               let entities = plist["system-entities"] as? [[String: Any]] else { return nil }
@@ -134,7 +140,7 @@ enum UpdateInstaller {
     }
 
     private static func detach(_ mountPoint: URL) async {
-        _ = await run(hdiutil, ["detach", mountPoint.path, "-force"])
+        _ = await run(diskutil, ["eject", mountPoint.path])
     }
 
     /// Runs a tool to completion and returns its exit status and combined output.

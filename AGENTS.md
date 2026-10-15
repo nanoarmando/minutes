@@ -68,7 +68,7 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
 
 - `Updates/`: `UpdateClient` (GitHub `releases/latest` of `nanoarmando/minutes`, ephemeral session; 404 means no
   release yet), `UpdateRelease` (`AppVersion`, eligibility, tag `v<x.y.z>`, asset `Minutes-<x.y.z>.dmg`),
-  `UpdateInstaller` (mount, verify against the running app's designated requirement and the version, stage in
+  `UpdateInstaller` (mount with `diskutil image attach`, falling back to `hdiutil attach`, eject with `diskutil eject`; verify against the running app's designated requirement and the version, stage in
   `~/Library/Caches/Minutes/updates`, swap script that restores `.Minutes-previous.app` on failure),
   `UpdateCoordinator` (owned by `AppEnvironment`; checks at launch, every 24 h and when About appears; in memory
   only; install refused while `isBusy`).
@@ -77,7 +77,9 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   Settings or About window is visible and back to `.accessory` afterwards. Window matching relies on the SwiftUI
   window identifiers "meetings", "about" and "Settings".
 - Version: the `VERSION` file is the single source (read by `build.sh`). `Scripts/build-dmg.sh <version>` runs
-  `build.sh --no-install` and creates `.build/Minutes-<version>.dmg`.
+  `build.sh --no-install` and creates `.build/Minutes-<version>.dmg` with `diskutil image create` (falls back to
+  `hdiutil create` where unavailable: on newer macOS its UDZO output can be corrupt depending on content) and refuses
+  to finish unless `hdiutil verify` passes, since installed copies up to now mount updates with `hdiutil attach`.
 
 ## Data contracts
 

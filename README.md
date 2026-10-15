@@ -251,11 +251,11 @@ The `calendar`, `attendees` and `meeting_link` keys appear only when the recordi
 The version lives in the `VERSION` file. To publish a release:
 
 ```sh
-./Scripts/build-dmg.sh 0.2.0          # must match VERSION; creates .build/Minutes-0.2.0.dmg
+./Scripts/build-dmg.sh 0.2.0          # must match VERSION; creates and verifies .build/Minutes-0.2.0.dmg
 gh release create v0.2.0 .build/Minutes-0.2.0.dmg --notes "…"
 ```
 
-Releases must be signed with the same `Minutes Self-Signed` identity, or installed copies refuse the update.
+Releases must be signed with the same `Minutes Self-Signed` identity, or installed copies refuse the update. The script refuses to finish when the disk image fails verification (on newer macOS, `hdiutil create` can produce corrupt images); run it again or check the output before publishing.
 
 ## Recovery
 
