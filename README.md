@@ -132,7 +132,8 @@ removes lines that repeat the remote speech closely.
 
 With calendar events on, the event of a followed calendar that is in progress when you start recording (all-day
 events are ignored) gives the note its title, and the note stores the calendar name, the attendees and the call
-link. One minute before an event with a call link or attendees starts, Minutes shows a notification
+link. One minute before an event with a call link starts (only when it is not cancelled and you
+accepted it, or it is your own event without guests), Minutes shows a notification
 ("… starts in 1 minute") with **Start recording** and **Dismiss**; if it learns about the event later (the event was
 added late, Minutes was opened or the Mac woke up), it notifies right away, up to five minutes after the start. It never records on its own.
 If you are still recording another meeting, the notification offers **Stop & record next** instead: it stops and

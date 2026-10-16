@@ -112,7 +112,7 @@ final class CalendarService {
     }
 
     /// Suggests what is already due (launch, late calendar changes, wake), then one timer for the next suggestion
-    /// moment: `leadTime` before the start of a qualifying event (a meeting link or at least one attendee).
+    /// moment: `leadTime` before the start of a qualifying event (not cancelled, accepted by the user, with a meeting link).
     private func planNextSuggestion() {
         timer?.cancel()
         guard isActive, preferences.suggestRecording else { return }
@@ -145,7 +145,13 @@ final class CalendarService {
     // MARK: - Event data
 
     private static func qualifies(_ event: EKEvent) -> Bool {
-        meetingLink(of: event) != nil || !attendees(of: event).isEmpty
+        event.status != .canceled && isAccepted(event) && meetingLink(of: event) != nil
+    }
+
+    /// Events without an invitation for the user (own events without guests) count as accepted.
+    private static func isAccepted(_ event: EKEvent) -> Bool {
+        guard let user = event.attendees?.first(where: \.isCurrentUser) else { return true }
+        return user.participantStatus == .accepted
     }
 
     /// The user's address is the attendee matching "Your email addresses", else the participant the calendar marks
@@ -178,10 +184,6 @@ final class CalendarService {
     private static func displayName(of participant: EKParticipant) -> String? {
         if let name = participant.name, !name.isEmpty { return name }
         return email(of: participant)
-    }
-
-    private static func attendees(of event: EKEvent) -> [String] {
-        (event.attendees ?? []).filter { !$0.isCurrentUser }.compactMap(displayName)
     }
 
     /// The event URL, else the first Zoom, Meet, Teams or Webex link in the location or notes.

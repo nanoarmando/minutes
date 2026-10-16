@@ -55,9 +55,11 @@ location or notes). Keys without a value SHALL be omitted.
 ### Requirement: Suggest recording when a meeting starts
 When calendar events are on, access is granted and "Suggest recording when a meeting starts" is on (default),
 Minutes SHALL show a system notification one minute before the start time of each event of a followed calendar that
-is not all-day and has a meeting link or at least one attendee. The notification SHALL be titled "<event> starts in
-1 minute". When nothing is being recorded it SHALL offer "Start recording" and "Dismiss"; "Start recording" SHALL
-start a recording whose note uses that event's data. When a recording is in progress it SHALL still be shown and
+is not all-day, is not cancelled, has a meeting link, and that the user accepted. An event without an invitation for
+the user (such as an event the user created without guests) SHALL count as accepted; an event whose invitation the
+user declined, marked as tentative or did not answer SHALL NOT qualify. The notification SHALL be titled "<event>
+starts in 1 minute". When nothing is being recorded it SHALL offer "Start recording" and "Dismiss"; "Start recording"
+SHALL start a recording whose note uses that event's data. When a recording is in progress it SHALL still be shown and
 SHALL offer "Stop & record next" and "Dismiss"; "Stop & record next" SHALL stop the current recording, which is then
 processed and saved as a normal stop, and immediately start a recording whose note uses that event's data. If
 nothing is being recorded when the user chooses "Stop & record next", it SHALL only start the recording. When the
@@ -66,7 +68,7 @@ moved late, Minutes was launched, or the Mac woke up), Minutes SHALL show it imm
 or started less than five minutes earlier. Minutes SHALL notify at most once per event occurrence.
 
 #### Scenario: Scheduled call starts
-- **WHEN** the followed-calendar event "Client kickoff" with a Google Meet link starts at 10:00 and nothing is being recorded
+- **WHEN** the followed-calendar event "Client kickoff" with a Google Meet link, which the user accepted, starts at 10:00 and nothing is being recorded
 - **THEN** at 09:59 a notification "Client kickoff starts in 1 minute" appears with "Start recording" and "Dismiss"
 
 #### Scenario: Start from the notification
@@ -100,6 +102,26 @@ or started less than five minutes earlier. Minutes SHALL notify at most once per
 #### Scenario: Event without link or attendees
 - **WHEN** an event with no meeting link and no other attendees is about to start
 - **THEN** no notification is shown
+
+#### Scenario: Event without a meeting link
+- **WHEN** an accepted event with attendees but no meeting link is about to start
+- **THEN** no notification is shown
+
+#### Scenario: Cancelled event
+- **WHEN** a followed-calendar event with a Zoom link is cancelled but remains in the calendar, and its start time approaches
+- **THEN** no notification is shown
+
+#### Scenario: Invitation not accepted
+- **WHEN** an event with a Teams link whose invitation the user declined, marked as tentative or did not answer is about to start
+- **THEN** no notification is shown
+
+#### Scenario: Own event without guests
+- **WHEN** an event the user created without guests, with a Google Meet link, is about to start
+- **THEN** the notification is shown
+
+#### Scenario: Cancelled after being planned
+- **WHEN** an accepted event with a meeting link is cancelled before the minute preceding its start
+- **THEN** no notification is shown for it
 
 #### Scenario: Suggestions turned off
 - **WHEN** the user turns off "Suggest recording when a meeting starts"
