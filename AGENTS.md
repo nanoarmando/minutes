@@ -158,7 +158,8 @@ documentation is in [README.md](README.md). Behavior is specified in `openspec/`
   `unfollowedCalendars` (calendar identifiers; storing the unfollowed set keeps new calendars followed). The event
   is the one in progress at start in a followed calendar, ignoring all-day events, with the most overlap.
   Suggestions fire one minute (`leadTime`) before the start of events that are not `.canceled`, accepted by the user (the `isCurrentUser`
-  attendee is `.accepted`; no such attendee counts as accepted) and have a meeting link, once per occurrence (in
+  attendee is `.accepted`; no such attendee counts as accepted) and have a meeting link (first `meetingHosts` match in the event URL, location or notes; any other URL, such as
+  `blockout://`, is ignored), once per occurrence (in
   memory), also while recording; every re-plan (launch, calendar or preference change, wake) first posts events whose
   suggestion moment passed and that started less than five minutes ago. The category is chosen at post time:
   "event-starting" ("Start recording") when idle, "event-starting-recording" ("Stop & record next") while recording.

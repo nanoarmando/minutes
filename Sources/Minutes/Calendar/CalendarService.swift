@@ -186,12 +186,12 @@ final class CalendarService {
         return email(of: participant)
     }
 
-    /// The event URL, else the first Zoom, Meet, Teams or Webex link in the location or notes.
+    /// The first Zoom, Meet, Teams or Webex link in the event URL, location or notes.
     private static func meetingLink(of event: EKEvent) -> String? {
-        if let url = event.url { return url.absoluteString }
         let text = [event.location, event.notes].compactMap { $0 }.joined(separator: "\n")
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
-        return detector.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url).first { url in
+        let detected = (try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue))?
+            .matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url) ?? []
+        return ([event.url].compactMap { $0 } + detected).first { url in
             guard let host = url.host()?.lowercased() else { return false }
             return meetingHosts.contains { host == $0 || host.hasSuffix("." + $0) }
         }?.absoluteString
